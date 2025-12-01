@@ -1,0 +1,11 @@
+name: env_leap
+dependencies:
+  - plotly
+  - pandas
+  - numpy
+  - matplotlib
+  - xlsxwriter
+  - pip
+  - jupyter
+  - openpyxl #guessing this wil install properly
+# conda env create --prefix ./env_leap --file ./config/env_leap.yml
