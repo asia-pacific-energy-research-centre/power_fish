@@ -14,7 +14,7 @@ This repository converts OSeMOSYS-style Excel inputs into a NEMO scenario databa
 - The COM API type library included here (`config/TypeLib_LEAP_API_full.txt`) is for reference when wiring Python automation later.
 
 ## Set up NEMO
-1. Create a template database once (placed in your `data/` folder):
+1. Create a template database once (placed in your `data/` folder). The pipeline can also auto-create it at runtime if `AUTO_CREATE_TEMPLATE_DB=True` and Julia/NemoMod are available:
    ```julia
    using NemoMod
    cd("C:/Users/YOU/path/to/power_fish/data")
@@ -30,9 +30,9 @@ conda activate ./env_leap
 The environment includes pandas/openpyxl/matplotlib/plotly for data prep and inspection.
 
 ## Running the pipeline
-1. Configure paths and options in `code/main.py` (input Excel, template DB, output DB, scenario name, Julia path, diagnostics flags).
-2. Ensure `data/nemo_template.sqlite` exists (see NEMO install steps above).
-3. Run everything:
+1. Configure paths and options in `code/main.py` (input Excel, template DB, output DB, scenario name, Julia path, diagnostics flags, `AUTO_CREATE_TEMPLATE_DB` toggle).
+2. If `AUTO_CREATE_TEMPLATE_DB` is True, the script will build `data/nemo_template.sqlite` for you on first run (requires Julia with NemoMod installed). Otherwise, create it manually (see NEMO setup above).
+3. Run everything in Jupyter interactive via visual studio code (which is how finn codes), or in python e.g.:
    ```bash
    python code/main.py
    ```
@@ -41,7 +41,7 @@ The environment includes pandas/openpyxl/matplotlib/plotly for data prep and ins
    - Solves the scenario in Julia/NEMO (`run_nemo_via_julia.py`) and writes an optional log (e.g., `data/nemo_run.log`).
 
 ## Coding style at a glance
-- Scripts are split into `#%%` cells for quick interactive runs (VS Code/Jupyter).
+- Scripts are split into `#%%` cells for quick interactive runs (VS Code with Jupyter interactive).
 - Functions first, orchestration later: utilities and data loaders sit near the top; `MAIN_*` blocks call them in order.
 - Prefer small, single-purpose functions over classes; keep inputs and outputs explicit.
 - Breakpoints are sprinkled in so you can step through cells when debugging.

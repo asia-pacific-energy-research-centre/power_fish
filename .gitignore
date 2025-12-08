@@ -16,7 +16,7 @@
 *.pkl
 *.dll
 *.sqlite
-
+*.lp
 !.gitkeep
 !data/POWER\ 20_USA_data_REF9_S3_test.xlsx
 

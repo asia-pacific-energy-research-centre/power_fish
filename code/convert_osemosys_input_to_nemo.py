@@ -21,11 +21,13 @@ PARAM_SPECS = {
         "nemo_table": "SpecifiedAnnualDemand",
         "indices": ["REGION", "FUEL"],  # -> r, f, plus y, val
         "filter_scenario": True,
+        "unit_type": "energy",
     },
     "SpecifiedDemandProfile": {
         "nemo_table": "SpecifiedDemandProfile",
         "indices": ["REGION", "FUEL", "TIMESLICE"],  # -> r, f, l, y, val
         "filter_scenario": True,
+        "unit_type": "energy",
     },
     # Tech parameters
     "CapacityFactor": {
@@ -50,6 +52,7 @@ PARAM_SPECS = {
         "nemo_table": "CapitalCost",
         "indices": ["REGION", "TECHNOLOGY"],
         "filter_scenario": False,
+        "unit_type": None,  # currency per capacity; leave as-is
     },
     "FixedCost": {
         "nemo_table": "FixedCost",
@@ -66,6 +69,7 @@ PARAM_SPECS = {
         "nemo_table": "ResidualCapacity",
         "indices": ["REGION", "TECHNOLOGY"],
         "filter_scenario": False,
+        "unit_type": "power",
     },
     "InputActivityRatio": {
         "nemo_table": "InputActivityRatio",
@@ -93,6 +97,15 @@ PARAM_SPECS = {
         "filter_scenario": False,
         "advanced_flag": "ReserveMargin",
     },
+    "ReserveMarginTagTechnology": {
+        "nemo_table": "ReserveMarginTagTechnology",
+        "indices": ["REGION", "TECHNOLOGY", "FUEL"],
+        "filter_scenario": False,
+        "advanced_flag": "ReserveMargin",
+        # Many OSeMOSYS workbooks omit the FUEL column; default to ALL so we
+        # still import the sheet instead of skipping it.
+        "defaults": {"FUEL": "ALL"},
+    },
     # Advanced: Annual emission limit
     "AnnualEmissionLimit": {
         "nemo_table": "AnnualEmissionLimit",
@@ -104,31 +117,132 @@ PARAM_SPECS = {
         "nemo_table": "TotalAnnualMaxCapacity",
         "indices": ["REGION", "TECHNOLOGY"],
         "filter_scenario": False,
+        "unit_type": "power",
     },
     "TotalAnnualMinCapacity": {
         "nemo_table": "TotalAnnualMinCapacity",
         "indices": ["REGION", "TECHNOLOGY"],
         "filter_scenario": False,
+        "unit_type": "power",
     },
     "TotalTechnologyAnnualActivityUp": {
         "nemo_table": "TotalTechnologyAnnualActivityUpperLimit",
         "indices": ["REGION", "TECHNOLOGY"],
         "filter_scenario": False,
+        "unit_type": "energy",
     },
     "TotalTechnologyAnnualActivityLo": {
         "nemo_table": "TotalTechnologyAnnualActivityLowerLimit",
         "indices": ["REGION", "TECHNOLOGY"],
         "filter_scenario": False,
+        "unit_type": "energy",
     },
     "TotalTechnologyModelPeriodActLo": {
         "nemo_table": "TotalTechnologyModelPeriodActivityLowerLimit",
         "indices": ["REGION", "TECHNOLOGY"],
         "filter_scenario": False,
+        "unit_type": "energy",
     },
     "TotalTechnologyModelPeriodActUp": {
         "nemo_table": "TotalTechnologyModelPeriodActivityUpperLimit",
         "indices": ["REGION", "TECHNOLOGY"],
         "filter_scenario": False,
+        "unit_type": "energy",
+    },
+    # Storage and related tables
+    "OperationalLife": {
+        "nemo_table": "OperationalLife",
+        "indices": ["REGION", "TECHNOLOGY"],
+        "filter_scenario": False,
+        "has_years": False,
+    },
+    "OperationalLifeStorage": {
+        "nemo_table": "OperationalLifeStorage",
+        "indices": ["REGION", "STORAGE"],
+        "filter_scenario": False,
+        "has_years": False,
+    },
+    "CapitalCostStorage": {
+        "nemo_table": "CapitalCostStorage",
+        "indices": ["REGION", "STORAGE"],
+        "filter_scenario": False,
+    },
+    "ResidualStorageCapacity": {
+        "nemo_table": "ResidualStorageCapacity",
+        "indices": ["REGION", "STORAGE"],
+        "filter_scenario": False,
+    },
+    "StorageFullLoadHours": {
+        "nemo_table": "StorageFullLoadHours",
+        "indices": ["REGION", "STORAGE"],
+        "filter_scenario": False,
+    },
+    "StorageLevelStart": {
+        "nemo_table": "StorageLevelStart",
+        "indices": ["REGION", "STORAGE"],
+        "filter_scenario": False,
+        "has_years": False,
+    },
+    "StorageMaxChargeRate": {
+        "nemo_table": "StorageMaxChargeRate",
+        "indices": ["REGION", "STORAGE"],
+        "filter_scenario": False,
+        "has_years": False,
+    },
+    "StorageMaxDischargeRate": {
+        "nemo_table": "StorageMaxDischargeRate",
+        "indices": ["REGION", "STORAGE"],
+        "filter_scenario": False,
+        "has_years": False,
+    },
+    "TechnologyToStorage": {
+        "nemo_table": "TechnologyToStorage",
+        "indices": ["REGION", "TECHNOLOGY", "STORAGE", "MODE_OF_OPERATION"],
+        "filter_scenario": False,
+        "defaults": {"MODE_OF_OPERATION": "1"},
+        "has_years": False,
+    },
+    "TechnologyFromStorage": {
+        "nemo_table": "TechnologyFromStorage",
+        "indices": ["REGION", "TECHNOLOGY", "STORAGE", "MODE_OF_OPERATION"],
+        "filter_scenario": False,
+        "defaults": {"MODE_OF_OPERATION": "1"},
+        "has_years": False,
+    },
+    "DefaultParams": {
+        "nemo_table": "DefaultParams",
+        "indices": ["TABLENAME"],
+        "filter_scenario": False,
+        "has_years": False,
+        "raw": True,
+    },
+    "STORAGE": {
+        "nemo_table": "STORAGE",
+        "indices": ["STORAGE", "DESC", "NETZEROYEAR", "NETZEROTG1", "NETZEROTG2"],
+        "filter_scenario": False,
+        "has_years": False,
+        "raw": True,
+    },
+    "TSGROUP1": {
+        "nemo_table": "TSGROUP1",
+        "indices": ["NAME", "DESC", "ORDER", "MULTIPLIER"],
+        "filter_scenario": False,
+        "has_years": False,
+        "raw": True,
+    },
+    "TSGROUP2": {
+        "nemo_table": "TSGROUP2",
+        "indices": ["NAME", "DESC", "ORDER", "MULTIPLIER"],
+        "filter_scenario": False,
+        "has_years": False,
+        "raw": True,
+    },
+    "LTsGroup": {
+        "nemo_table": "LTsGroup",
+        "indices": ["TIMESLICE", "TSGROUP2", "TSGROUP1", "LORDER"],
+        "filter_scenario": False,
+        "has_years": False,
+        "raw": True,
     },
     # Time-slice weights
     "YearSplit": {
@@ -149,6 +263,17 @@ INDEX_NAME_MAP = {
     "TIMESLICE": "l",
     "EMISSION": "e",
     "MODE_OF_OPERATION": "m",
+    "STORAGE": "s",
+    "TSGROUP1": "tg1",
+    "TSGROUP2": "tg2",
+    "LORDER": "lorder",
+    "TABLENAME": "tablename",
+    "DESC": "desc",
+    "ORDER": "order",
+    "MULTIPLIER": "multiplier",
+    "NETZEROYEAR": "netzeroyear",
+    "NETZEROTG1": "netzerotg1",
+    "NETZEROTG2": "netzerotg2",
 }
 INDEX_NAME_MAP_REV = {v: k for k, v in INDEX_NAME_MAP.items()}
 
@@ -296,6 +421,24 @@ def insert_rows_no_year(conn, nemo_table: str, rows: list[dict], indices: list[s
     conn.commit()
     print(f"  Inserted {len(rows)} rows into {nemo_table}.")
 
+def insert_raw_table(conn, nemo_table: str, df: pd.DataFrame):
+    """
+    Raw copy helper for tables that don't fit the YEAR/VALUE pattern.
+    Assumes df already has DB column names.
+    """
+    if df.empty:
+        print(f"  No rows to insert into {nemo_table}.")
+        return
+    # Map verbose column names back to DB short names when possible.
+    rename_map = {col: INDEX_NAME_MAP.get(col, col) for col in df.columns}
+    rename_map["VALUE"] = "val"
+    df = df.rename(columns=rename_map)
+    cur = conn.cursor()
+    cur.execute(f'DELETE FROM "{nemo_table}"')
+    conn.commit()
+    df.to_sql(nemo_table, conn, if_exists="append", index=False)
+    print(f"  Inserted {len(df)} rows into {nemo_table} (raw copy).")
+
 def _detect_year_table(conn) -> tuple[str | None, str | None]:
     """
     Locate the YEAR table and its year column.
@@ -319,6 +462,88 @@ def _detect_year_table(conn) -> tuple[str | None, str | None]:
             col = cols[0]
         return tbl, col
     return None, None
+
+
+# -------------------------------------------------------------------
+# Units handling
+# -------------------------------------------------------------------
+# Scaling factors to target units
+UNIT_SCALES = {
+    "energy": {
+        "MWh": 1.0,
+        "GWh": 1e3,
+        "TWh": 1e6,
+        "kWh": 1e-3,
+        "PJ": 277_777.77777777775,  # 1 PJ = 277_777.78 MWh
+        "TJ": 277.77777777777777,
+        "MJ": 0.0002777777777777778,
+        "J": 2.777777777777778e-10,
+    },
+    "power": {
+        "MW": 1.0,
+        "GW": 1e3,
+        "kW": 1e-3,
+        "W": 1e-6,
+    },
+}
+
+DEFAULT_TARGET_UNITS = {
+    "energy": "MWh",
+    "power": "MW"
+}
+UNITS_TO_IGNORE = ["PJ/MWh", 'PJ/PJ', "fraction of year", 'years', 'million $/GW', 'million $/PJ', 'points', 'million tonnes CO2/PJ', 'Years']
+
+MISSING_UNITS_MAPPING = {
+    'SpecifiedAnnualDemand': 'PJ'
+}
+
+def convert_units(df: pd.DataFrame, unit_type: str | None, target_unit: str, warnings: list[str], sheet_name:str|None=None) -> pd.DataFrame:
+    """
+    Convert numeric value columns to target_unit based on UNITS column (if present).
+    Expects wide-year tables with numeric year columns, or VALUE column for non-year tables.
+    """
+    if unit_type is None:
+        return df
+    if "UNITS" not in df.columns:
+        if sheet_name in MISSING_UNITS_MAPPING:
+            df = df.copy()
+            df["UNITS"] = MISSING_UNITS_MAPPING[sheet_name]
+        else:
+            return df
+    scale_map = UNIT_SCALES.get(unit_type, {})
+    target_scale = scale_map.get(target_unit)
+    if target_scale is None:
+        warnings.append(f"Unknown target unit '{target_unit}' for unit_type '{unit_type}'")
+        return df
+
+    df = df.copy()
+    year_cols = [c for c in df.columns if str(c).strip().isdigit()]
+    value_cols = year_cols if year_cols else (["VALUE"] if "VALUE" in df.columns else [])
+    if not value_cols:
+        return df
+
+    for idx, row in df.iterrows():
+        unit = str(row.get("UNITS", "")).strip()
+        if not unit and sheet_name in MISSING_UNITS_MAPPING:
+            unit = MISSING_UNITS_MAPPING[sheet_name]
+        if not unit:
+            continue
+        if unit in UNITS_TO_IGNORE:
+            continue
+        scale = scale_map.get(unit)
+        if scale is None:
+            warnings.append(f"Unknown unit '{unit}' for unit_type '{unit_type}' in row {idx}")
+            continue
+        factor = scale / target_scale
+        for col in value_cols:
+            try:
+                val = row[col]
+                if pd.isna(val):
+                    continue
+                df.at[idx, col] = float(val) * factor
+            except Exception:
+                continue
+    return df
 
 
 def _fetch_years(conn) -> list[int]:
@@ -397,7 +622,6 @@ def _table_to_wide(
     wide.columns = [str(c) if isinstance(c, (int, float)) else c for c in wide.columns]
     return wide
 
-
 def dump_db_to_entry_excel(
     db_path: Path,
     excel_path: Path,
@@ -441,14 +665,31 @@ def dump_db_to_entry_excel(
                 continue
 
             indices_verbose = spec["indices"]
-            wide_df = _table_to_wide(
-                conn,
-                table_name=table_name,
-                sheet_name=sheet_name,
-                indices_verbose=indices_verbose,
-                all_years=all_years,
-                max_rows=max_rows,
-            )
+            if spec.get("raw"):
+                try:
+                    wide_df = pd.read_sql_query(f'SELECT * FROM "{table_name}"', conn)
+                    rename_map = {k: INDEX_NAME_MAP_REV.get(k, k) for k in wide_df.columns}
+                    wide_df = wide_df.rename(columns=rename_map)
+                except Exception:
+                    wide_df = pd.DataFrame()
+            elif not spec.get("has_years", True):
+                try:
+                    wide_df = pd.read_sql_query(f'SELECT * FROM "{table_name}"', conn)
+                    rename_map = {k: INDEX_NAME_MAP_REV.get(k, k) for k in wide_df.columns}
+                    wide_df = wide_df.rename(columns=rename_map)
+                    if "VALUE" not in wide_df.columns and "val" in wide_df.columns:
+                        wide_df = wide_df.rename(columns={"val": "VALUE"})
+                except Exception:
+                    wide_df = pd.DataFrame()
+            else:
+                wide_df = _table_to_wide(
+                    conn,
+                    table_name=table_name,
+                    sheet_name=sheet_name,
+                    indices_verbose=indices_verbose,
+                    all_years=all_years,
+                    max_rows=max_rows,
+                )
 
             out_sheet = unique_sheet_name(sheet_name)
             wide_df.to_excel(writer, sheet_name=out_sheet, index=False)
@@ -513,6 +754,47 @@ def _insert_set_values(conn: sqlite3.Connection, table: str, values: set[str]):
     conn.commit()
     print(f"Inserted {len(values)} values into {table}.")
 
+
+def _backfill_capacity_unit_years(conn: sqlite3.Connection):
+    """
+    Some templates define CapacityOfOneTechnologyUnit with a year column (y).
+    When we load year-less data, y stays NULL and can break NEMO. Duplicate
+    rows across all YEARS to ensure y is populated.
+    """
+    cur = conn.cursor()
+    try:
+        cols = [r[1] for r in cur.execute('PRAGMA table_info("CapacityOfOneTechnologyUnit")')]
+        if "y" not in cols:
+            return
+    except Exception:
+        return
+
+    years = [r[0] for r in cur.execute('SELECT val FROM "YEAR"')]
+    if not years:
+        return
+
+    rows = cur.execute(
+        'SELECT id, r, t, val FROM "CapacityOfOneTechnologyUnit" WHERE y IS NULL'
+    ).fetchall()
+    if not rows:
+        return
+
+    cur.execute('DELETE FROM "CapacityOfOneTechnologyUnit" WHERE y IS NULL')
+    new_rows = []
+    for _, r, t, val in rows:
+        for y in years:
+            try:
+                v = float(val)
+            except Exception:
+                v = val
+            new_rows.append((r, t, y, v))
+    cur.executemany(
+        'INSERT INTO "CapacityOfOneTechnologyUnit" (r, t, y, val) VALUES (?, ?, ?, ?)',
+        new_rows,
+    )
+    conn.commit()
+    print(f"Backfilled CapacityOfOneTechnologyUnit for years; added {len(new_rows)} rows.")
+
 # -------------------------------------------------------------------
 # MAIN
 # -------------------------------------------------------------------
@@ -553,7 +835,10 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any]):
     output_db = Path(config["OUTPUT_DB"])
     SCENARIO = str(config["SCENARIO"])
     use_advanced = dict(config.get("USE_ADVANCED") or {})
-
+    target_units_cfg = dict(config.get("TARGET_UNITS") or {})
+    target_energy_unit = target_units_cfg.get("energy", DEFAULT_TARGET_UNITS["energy"])
+    target_power_unit = target_units_cfg.get("power", DEFAULT_TARGET_UNITS["power"])
+    strict_errors = bool(config.get("STRICT_ERRORS", False))
     export_db_to_excel = bool(config.get("EXPORT_DB_TO_EXCEL", False))
     export_excel_path = Path(
         config.get("EXPORT_EXCEL_PATH", output_db.with_suffix(".xlsx"))
@@ -572,12 +857,6 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any]):
     collected_sets: DefaultDict[str, set[str]] = defaultdict(set)
     collected_years: set[int] = set()
     warnings: list[str] = []
-    # Auto-fill controls:
-    # - AUTO_FILL_MISSING_MODES: legacy flag; enables IAR->OAR fill for missing mode pairs.
-    # - AUTO_FILL_IAR_TO_OAR: explicitly fill missing OAR rows from IAR rows (safer for storage).
-    # - AUTO_FILL_OAR_TO_IAR: explicitly fill missing IAR rows from OAR rows (disabled by default; can create false inputs).
-    auto_fill_iar_to_oar = bool(config.get("AUTO_FILL_IAR_TO_OAR", False) or config.get("AUTO_FILL_MISSING_MODES", False))
-    auto_fill_oar_to_iar = bool(config.get("AUTO_FILL_OAR_TO_IAR", False))
 
     # Populate simple set tables directly from VALUE-based sheets (if present)
     for set_sheet, target_table in SET_SHEETS.items():
@@ -619,6 +898,7 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any]):
 
         defaults_map = dict(spec.get("defaults", {}) or {})
         has_years = spec.get("has_years", True)
+        is_raw = bool(spec.get("raw", False))
 
         # Filter scenario if needed
         if filter_scen:
@@ -627,11 +907,16 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any]):
                 print(f"  No rows for scenario '{SCENARIO}'. Skipping.")
                 continue
 
-        # Check indices exist
-        missing = [i for i in indices if i not in df.columns and i not in defaults_map]
-        if missing:
-            print(f"  Missing required columns {missing} in '{sheet_name}'. Skipping.")
-            continue
+        # Simple renames for val->VALUE when has_years=False (non-raw tables)
+        if (not spec.get("raw", False)) and (not has_years) and "VALUE" not in df.columns and "val" in df.columns:
+            df = df.rename(columns={"val": "VALUE"})
+
+        # Check indices exist (skip for raw tables)
+        if not is_raw:
+            missing = [i for i in indices if i not in df.columns and i not in defaults_map]
+            if missing:
+                print(f"  Missing required columns {missing} in '{sheet_name}'. Skipping.")
+                continue
 
         # Fill optional/defaulted columns that are absent in the sheet
         for idx, default_val in defaults_map.items():
@@ -642,12 +927,24 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any]):
         if "MODE_OF_OPERATION" in df.columns:
             df["MODE_OF_OPERATION"] = df["MODE_OF_OPERATION"].apply(_normalize_mode_value)
 
+        if is_raw:
+            # For raw tables, just copy rows directly.
+            insert_raw_table(conn, nemo_table, df)
+            continue
+
         # Warn about missing index values that will be skipped
         for idx in indices:
             if df[idx].isna().any():
                 warnings.append(
                     f"{sheet_name}: {df[idx].isna().sum()} rows missing {idx} will be skipped."
                 )
+
+        # Optional unit conversion
+        unit_type = spec.get("unit_type")
+        if unit_type == "energy":
+            df = convert_units(df, "energy", target_energy_unit, warnings, sheet_name=sheet_name)
+        elif unit_type == "power":
+            df = convert_units(df, "power", target_power_unit, warnings, sheet_name=sheet_name)
 
         if has_years:
             # Identify year columns
@@ -702,61 +999,30 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any]):
     else:
         populate_year_table(conn)
 
+    _backfill_capacity_unit_years(conn)
+
     # Cross-check modes and YearSplit consistency
     cur = conn.cursor()
-    iar_pairs = {(t, m) for t, m in cur.execute('select t, m from InputActivityRatio where m is not null')}
-    oar_pairs = {(t, m) for t, m in cur.execute('select t, m from OutputActivityRatio where m is not null')}
-    missing_oar = iar_pairs - oar_pairs
-    if auto_fill_iar_to_oar and missing_oar:
-        rows_to_insert = []
-        for t, m in missing_oar:
-            src_rows = cur.execute(
-                'select r, t, f, m, y from InputActivityRatio where t = ? and m = ?',
-                (t, m),
-            ).fetchall()
-            for r, t_val, f, m_val, y in src_rows:
-                rows_to_insert.append((r, t_val, f, m_val, y, 1.0))
-        if rows_to_insert:
-            cur.executemany(
-                'insert into OutputActivityRatio (r,t,f,m,y,val) values (?,?,?,?,?,?)',
-                rows_to_insert,
-            )
-            conn.commit()
-            print(f"Auto-filled {len(rows_to_insert)} OutputActivityRatio rows for missing mode pairs.")
-            # refresh pairs after insert
-            oar_pairs = {(t, m) for t, m in cur.execute('select t, m from OutputActivityRatio where m is not null')}
-            missing_oar = iar_pairs - oar_pairs
+    iar_pairs = {(t, m) for t, m in cur.execute('select distinct t, m from InputActivityRatio')}
+    oar_pairs = {(t, m) for t, m in cur.execute('select distinct t, m from OutputActivityRatio')}
+    iar_techs = {t for t, _ in iar_pairs}
+    oar_techs = {t for t, _ in oar_pairs}
+
+    missing_oar = iar_techs - oar_techs
+    # Supply-only technologies (fuel producers/imports) are allowed, so OAR without IAR is OK.
+    missing_iar = oar_techs - iar_techs
+
+    if missing_oar and strict_errors:
+        breakpoint()#
+        raise Exception(f"Technologies present in InputActivityRatio but missing in OutputActivityRatio: {sorted(missing_oar)}")
 
     if missing_oar:
-        sample = sorted(missing_oar)[:5]
         warnings.append(
-            f"{len(missing_oar)} tech/modes present in InputActivityRatio but missing in OutputActivityRatio (sample {sample})"
+            f"{len(missing_oar)} technologies present in InputActivityRatio but missing in OutputActivityRatio (sample {sorted(missing_oar)[:5]})"
         )
-    missing_iar = oar_pairs - iar_pairs
-    if auto_fill_oar_to_iar and missing_iar:
-        rows_to_insert = []
-        for t, m in missing_iar:
-            src_rows = cur.execute(
-                'select r, t, f, m, y from OutputActivityRatio where t = ? and m = ?',
-                (t, m),
-            ).fetchall()
-            for r, t_val, f, m_val, y in src_rows:
-                rows_to_insert.append((r, t_val, f, m_val, y, 1.0))
-        if rows_to_insert:
-            cur.executemany(
-                'insert into InputActivityRatio (r,t,f,m,y,val) values (?,?,?,?,?,?)',
-                rows_to_insert,
-            )
-            conn.commit()
-            print(f"Auto-filled {len(rows_to_insert)} InputActivityRatio rows for missing mode pairs.")
-            # refresh pairs after insert
-            iar_pairs = {(t, m) for t, m in cur.execute('select t, m from InputActivityRatio where m is not null')}
-            missing_iar = oar_pairs - iar_pairs
-
     if missing_iar:
-        sample = sorted(missing_iar)[:5]
         warnings.append(
-            f"{len(missing_iar)} tech/modes present in OutputActivityRatio but missing in InputActivityRatio (sample {sample})"
+            f"{len(missing_iar)} technologies present in OutputActivityRatio but missing in InputActivityRatio (supply-only techs? sample {sorted(missing_iar)[:5]})"
         )
     used_modes = {m for _, m in (iar_pairs | oar_pairs) if m is not None}
     mode_set = {r[0] for r in cur.execute('select val from MODE_OF_OPERATION')}
