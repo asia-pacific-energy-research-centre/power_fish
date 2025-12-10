@@ -1,0 +1,566 @@
+from __future__ import annotations
+
+"""
+Core utilities for the NEMO pipeline: template DB helpers, storage test flow,
+log analysis, diagnostics, and dummy workbook generation.
+"""
+
+from pathlib import Path
+import sqlite3
+import shutil
+import re
+import sys
+from typing import Iterable, Sequence
+
+import pandas as pd
+
+from convert_osemosys_input_to_nemo import dump_db_to_entry_excel, PARAM_SPECS
+from run_nemo_via_julia import create_template_db, run_nemo_on_db
+
+
+# ---------------------------------------------------------------------------
+# Template DB helpers
+# ---------------------------------------------------------------------------
+def ensure_template_db(template_path: Path, auto_create: bool, julia_exe: str | Path | None):
+    """Make sure the NEMO template DB exists; optionally create it with Julia if missing."""
+    template_path = Path(template_path)
+    if template_path.exists():
+        return
+    if not auto_create:
+        raise FileNotFoundError(
+            f"Template DB '{template_path}' not found. "
+            "Set AUTO_CREATE_TEMPLATE_DB=True to build it automatically."
+        )
+    create_template_db(template_path, julia_exe=julia_exe)
+
+
+def trim_db_years_in_place(db_path: Path, years: list[int]):
+    """Remove rows from all tables that have a 'y' column for years not in the list."""
+    years = sorted({int(y) for y in years})
+    if not years:
+        return
+    years_param = ",".join("?" * len(years))
+    with sqlite3.connect(db_path) as conn:
+        cur = conn.cursor()
+        tables = [
+            r[0]
+            for r in cur.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+        ]
+        for tbl in tables:
+            info = cur.execute(f'PRAGMA table_info("{tbl}")').fetchall()
+            cols = [c[1] for c in info]
+            if "y" not in cols:
+                continue
+            cur.execute(
+                f'DELETE FROM \"{tbl}\" WHERE y NOT IN ({years_param})',
+                tuple(years),
+            )
+        if "YEAR" in tables:
+            cur.execute(f'DELETE FROM \"YEAR\" WHERE val NOT IN ({years_param})', tuple(years))
+        conn.commit()
+
+
+def maybe_handle_storage_test(vars_cfg: dict, data_dir: Path, log_dir: Path, run_nemo: bool) -> bool:
+    """
+    Handle the storage test shortcut (skip conversion) if enabled.
+    Returns True if the flow was handled and the caller should exit early.
+    """
+    if not vars_cfg.get("USE_STORAGE_TEST_DB"):
+        return False
+
+    db_path = Path(vars_cfg.get("STORAGE_TEST_DB", data_dir / "storage_test.sqlite"))
+    if not db_path.exists():
+        raise FileNotFoundError(f"Storage test DB not found at '{db_path}'")
+
+    if vars_cfg.get("EXPORT_DB_TO_EXCEL"):
+        dump_db_to_entry_excel(
+            db_path=db_path,
+            excel_path=Path(vars_cfg.get("STORAGE_TEST_EXCEL_PATH", data_dir / "storage_test_dump.xlsx")),
+            specs=PARAM_SPECS,
+            tables=None,
+            max_rows=None,
+            use_advanced=None,
+        )
+
+    if run_nemo:
+        run_nemo_on_db(
+            db_path,
+            julia_exe=vars_cfg.get("JULIA_EXE"),
+            log_path=log_dir / "nemo_run.log",
+            stream_output=True,
+        )
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Log analysis
+# ---------------------------------------------------------------------------
+KEY_PATTERNS = {
+    "task_failed": re.compile(r"TaskFailedException", re.IGNORECASE),
+    "key_error": re.compile(r"KeyError", re.IGNORECASE),
+    "infeasible": re.compile(r"infeasible", re.IGNORECASE),
+    "unbounded": re.compile(r"unbounded", re.IGNORECASE),
+    "dual_infeasible": re.compile(r"DualInfeasible|Dual infeasible", re.IGNORECASE),
+    "primal_inf": re.compile(r"Primal inf", re.IGNORECASE),
+    "solver_status": re.compile(r"NEMO termination status:\\s*(.+)", re.IGNORECASE),
+}
+
+
+def analyze_log(log_path: Path):
+    text = log_path.read_text(errors="ignore")
+    lines = text.splitlines()
+
+    findings: list[str] = []
+
+    status_matches = KEY_PATTERNS["solver_status"].findall(text)
+    if status_matches:
+        findings.append(f"Solver status: {status_matches[-1].strip()}")
+
+    for name, pattern in KEY_PATTERNS.items():
+        if name == "solver_status":
+            continue
+        matches = pattern.findall(text)
+        if matches:
+            findings.append(f"Found {len(matches)} occurrences of '{name}'.")
+
+    if not findings:
+        findings.append("No obvious errors found.")
+
+    tail = "\\n".join(lines[-30:]) if lines else ""
+
+    return findings, tail
+
+
+# ---------------------------------------------------------------------------
+# Diagnostics
+# ---------------------------------------------------------------------------
+def parse_years(arg: str | None) -> list[int] | None:
+    if not arg:
+        return None
+    out = []
+    for part in arg.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        out.append(int(part))
+    return out
+
+
+def load_df(conn: sqlite3.Connection, table: str) -> pd.DataFrame:
+    try:
+        return pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
+    except Exception:
+        return pd.DataFrame()
+
+
+def trim_years(conn: sqlite3.Connection, years: Sequence[int], tables: Iterable[str]):
+    years_set = set(int(y) for y in years)
+    cur = conn.cursor()
+    for table in tables:
+        try:
+            info = cur.execute(f'PRAGMA table_info("{table}")').fetchall()
+        except Exception:
+            continue
+        cols = [c[1] for c in info]
+        if "y" not in cols:
+            continue
+        cur.execute(f'DELETE FROM "{table}" WHERE y NOT IN ({",".join("?"*len(years_set))})', tuple(years_set))
+    # YEAR set table
+    cur.execute('DELETE FROM "YEAR" WHERE val NOT IN ({})'.format(",".join("?"*len(years_set))), tuple(years_set))
+    conn.commit()
+
+
+def _print_section(title: str):
+    print("\\n" + title)
+    print("-" * len(title))
+
+
+def run_diagnostics(db_path: str | Path, years: list[int] | None = None, write_trimmed: str | Path | None = None):
+    db_path = Path(db_path)
+    work_db = db_path
+    if write_trimmed and years:
+        work_db = Path(write_trimmed)
+        shutil.copyfile(db_path, work_db)
+        with sqlite3.connect(work_db) as conn:
+            trim_years(conn, years, tables=[])
+        print(f"Wrote trimmed DB to {work_db}")
+
+    with sqlite3.connect(work_db) as conn:
+        # Sets
+        sets = {}
+        for tbl in ["REGION", "TECHNOLOGY", "FUEL", "TIMESLICE", "EMISSION", "YEAR", "MODE_OF_OPERATION"]:
+            df_set = load_df(conn, tbl)
+            sets[tbl] = set(df_set["val"].astype(str)) if not df_set.empty else set()
+
+        _print_section("Years and demand coverage")
+        sad = load_df(conn, "SpecifiedAnnualDemand")
+        if sad.empty:
+            print("SpecifiedAnnualDemand: empty")
+        else:
+            if years:
+                sad = sad[sad["y"].astype(int).isin(years)]
+            print(f"Demand rows: {len(sad)}; regions: {sorted(sad['r'].unique())}; fuels: {sorted(sad['f'].unique())}; years: {sorted(sad['y'].unique())[:10]}")
+
+        _print_section("Supply tech presence")
+        af = load_df(conn, "AvailabilityFactor")
+        if af.empty:
+            print("AvailabilityFactor: empty")
+        else:
+            if years:
+                af = af[af["y"].astype(int).isin(years)]
+            print(f"Techs with availability factors: {len(sorted(af['t'].unique()))}; sample: {sorted(af['t'].unique())[:5]}")
+
+        _print_section("Input/Output activity ratios")
+        iar = load_df(conn, "InputActivityRatio")
+        oar = load_df(conn, "OutputActivityRatio")
+        if years:
+            if not iar.empty and "y" in iar.columns:
+                iar = iar[iar["y"].astype(int).isin(years)]
+            if not oar.empty and "y" in oar.columns:
+                oar = oar[oar["y"].astype(int).isin(years)]
+        if iar.empty:
+            print("InputActivityRatio: empty (no fuel inputs defined!)")
+        else:
+            modes = sorted(set(str(m) for m in iar["m"].dropna().unique()))
+            fuels = sorted(set(str(f) for f in iar["f"].dropna().unique()))
+            print(f"IAR rows: {len(iar)}; techs: {len(set(iar['t']))}; fuels: {fuels[:5]}; modes: {modes}")
+        if oar.empty:
+            print("OutputActivityRatio: empty (no fuel outputs defined!)")
+        else:
+            modes = sorted(set(str(m) for m in oar["m"].dropna().unique()))
+            fuels = sorted(set(str(f) for f in oar["f"].dropna().unique()))
+            print(f"OAR rows: {len(oar)}; techs: {len(set(oar['t']))}; fuels: {fuels[:5]}; modes: {modes}")
+
+        _print_section("Demand fuels coverage by output ratios")
+        if not sad.empty and not oar.empty:
+            demand_fuels = set(sad["f"])
+            oar_fuels = set(oar["f"])
+            missing_fuels = sorted(demand_fuels - oar_fuels)
+            if missing_fuels:
+                print(f"Demand fuels with no OutputActivityRatio: {missing_fuels[:10]}")
+            else:
+                print("All demand fuels appear in OutputActivityRatio.")
+
+        _print_section("Reserve margin status")
+        rm = load_df(conn, "ReserveMargin")
+        if rm.empty:
+            print("ReserveMargin: empty (or disabled).")
+        else:
+            if years:
+                rm = rm[rm["y"].astype(int).isin(years)]
+            fuels = sorted(set(str(f) for f in rm["f"].unique()))
+            print(f"ReserveMargin rows: {len(rm)}; fuels tags: {fuels[:10]}")
+
+        _print_section("Emission limits and ratios")
+        ael = load_df(conn, "AnnualEmissionLimit")
+        if ael.empty:
+            print("AnnualEmissionLimit: empty (or disabled).")
+        else:
+            if years:
+                ael = ael[ael["y"].astype(int).isin(years)]
+            print(f"AnnualEmissionLimit rows: {len(ael)}; emissions: {sorted(ael['e'].unique())[:5]}")
+        ear = load_df(conn, "EmissionActivityRatio")
+        if ear.empty:
+            print("EmissionActivityRatio: empty!")
+        else:
+            modes = sorted(set(str(m) for m in ear["m"].dropna().unique()))
+            print(f"EmissionActivityRatio rows: {len(ear)}; modes present: {modes}")
+
+        _print_section("Basic conflict checks")
+        # Demand years vs availability years
+        if not sad.empty and not af.empty:
+            demand_years = set(int(y) for y in sad["y"].unique())
+            avail_years = set(int(y) for y in af["y"].unique())
+            missing_years = sorted(demand_years - avail_years)
+            if missing_years:
+                print(f"No availability factors for demand years: {missing_years[:10]}")
+            else:
+                print("Availability factors cover all demand years.")
+
+        # Demand fuels vs output fuels
+        if not sad.empty and not oar.empty:
+            demand_fuels = set(sad["f"])
+            oar_fuels = set(oar["f"])
+            missing_fuels = sorted(demand_fuels - oar_fuels)
+            if missing_fuels:
+                print(f"WARNING: Demand fuels missing in OutputActivityRatio: {missing_fuels[:10]}")
+
+        # Emission coverage: if limits exist but no emission ratios
+        if not ael.empty and ear.empty:
+            print("WARNING: Emission limits present but no EmissionActivityRatio rows.")
+
+        # Modes coverage
+        if not ear.empty:
+            modes_set = sets.get("MODE_OF_OPERATION", set())
+            if modes_set and not set(modes_set) >= set(str(m) for m in ear["m"].dropna().unique()):
+                print("WARNING: EmissionActivityRatio modes not all in MODE_OF_OPERATION set.")
+
+
+# ---------------------------------------------------------------------------
+# Dummy workbook generator
+# ---------------------------------------------------------------------------
+def make_dummy_workbook(
+    out_path: Path,
+    *,
+    scenario: str = "Reference",
+    years: list[int] | None = None,
+    region: str = "R1",
+    timeslice: str = "ANNUAL",
+    gen_tech: str = "GEN_GAS",
+    supply_tech: str = "GAS_SUPPLY",  # unused in simplified dummy
+    input_fuel: str = "GAS",  # unused in simplified dummy
+    output_fuel: str = "ELEC",
+    mode: str = "1",
+):
+    years = years or [2017, 2018]
+    techs = [gen_tech]
+    fuels = [output_fuel]
+
+    # Set sheets (VALUE column)
+    set_frames = {
+        "REGION": pd.DataFrame({"VALUE": [region]}),
+        "TECHNOLOGY": pd.DataFrame({"VALUE": techs}),
+        "FUEL": pd.DataFrame({"VALUE": fuels}),
+        "TIMESLICE": pd.DataFrame({"VALUE": [timeslice]}),
+        "EMISSION": pd.DataFrame({"VALUE": []}),  # empty but present
+        "MODE_OF_OPERATION": pd.DataFrame({"VALUE": [mode]}),
+        "YEAR": pd.DataFrame({"VALUE": years}),
+    }
+
+    def wide(df_dict: dict[str, list], value_per_year):
+        """Attach per-year columns. Accepts either a scalar or a list/tuple with one value per year."""
+        df = pd.DataFrame(df_dict)
+        for idx, y in enumerate(years):
+            if isinstance(value_per_year, (list, tuple)) and len(value_per_year) == len(years):
+                val = value_per_year[idx]
+            else:
+                val = value_per_year
+            df[str(y)] = val
+        return df
+
+    # Demand for output fuel
+    specified_demand = wide(
+        {
+            "SCENARIO": [scenario],
+            "REGION": [region],
+            "FUEL": [output_fuel],
+            "UNITS": ["GWh"],
+        },
+        [0, 0],  # zero demand to keep dummy trivially feasible
+    )
+
+    # InputActivityRatio omitted (fuel-free generator)
+    iar = pd.DataFrame(columns=["SCENARIO", "REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION"])
+    oar = wide(
+        {
+            "SCENARIO": [scenario],
+            "REGION": [region],
+            "TECHNOLOGY": [gen_tech],
+            "FUEL": [output_fuel],
+            "MODE_OF_OPERATION": [mode],
+            "UNITS": ["PJ/PJ"],
+        },
+        [1.0, 1.0],
+    )
+
+    # Simple capacity/availability and costs
+    capacity_factor = wide(
+        {
+            "SCENARIO": [scenario],
+            "REGION": [region],
+            "TECHNOLOGY": [gen_tech],
+            "TIMESLICE": [timeslice],
+            "UNITS": ["fraction"],
+        },
+        [0.9, 0.9],
+    )
+    capital_cost = wide(
+        {
+            "SCENARIO": [scenario],
+            "REGION": [region],
+            "TECHNOLOGY": [gen_tech],
+            "UNITS": ["$/kW"],
+        },
+        [1200, 1100],
+    )
+    fixed_cost = wide(
+        {
+            "SCENARIO": [scenario],
+            "REGION": [region],
+            "TECHNOLOGY": [gen_tech],
+            "UNITS": ["$/kW-yr"],
+        },
+        [30, 30],
+    )
+    variable_cost = wide(
+        {
+            "SCENARIO": [scenario],
+            "REGION": [region],
+            "TECHNOLOGY": [gen_tech],
+            "MODE_OF_OPERATION": [mode],
+            "UNITS": ["$/MWh"],
+        },
+        [10, 10],
+    )
+
+    # Tables without year columns (use VALUE)
+    capacity_per_unit = pd.DataFrame(
+        {
+            "REGION": [region],
+            "TECHNOLOGY": [gen_tech],
+            "UNITS": ["MW/unit"],
+            "VALUE": [200],
+        }
+    )
+    capacity_to_activity = pd.DataFrame(
+        {
+            "REGION": [region],
+            "TECHNOLOGY": [gen_tech],
+            "UNITS": ["GWh/MWyr"],
+            "VALUE": [8.76],
+        }
+    )
+
+    # YearSplit: single timeslice sums to 1
+    yearsplit = wide(
+        {
+            "TIMESLICE": [timeslice],
+            "UNITS": ["fraction"],
+        },
+        [1.0, 1.0],
+    )
+
+    total_annual_max_capacity = wide(
+        {
+            "SCENARIO": [scenario],
+            "REGION": [region],
+            "TECHNOLOGY": [gen_tech],
+            "UNITS": ["MW"],
+        },
+        [1_000_000_000, 1_000_000_000],  # effectively unconstrained
+    )
+    residual_capacity = wide(
+        {
+            "SCENARIO": [scenario],
+            "REGION": [region],
+            "TECHNOLOGY": [gen_tech],
+            "UNITS": ["MW"],
+        },
+        [1000, 1000],  # seed enough capacity to satisfy demand
+    )
+
+    sheets: dict[str, pd.DataFrame] = {
+        **set_frames,
+        "SpecifiedAnnualDemand": specified_demand,
+        "InputActivityRatio": iar,
+        "OutputActivityRatio": oar,
+        # Converter expects this sheet name to populate AvailabilityFactor table
+        "CapacityFactor": capacity_factor,
+        "VariableCost": variable_cost,
+        "CapitalCost": capital_cost,
+        "FixedCost": fixed_cost,
+        # Seed residual capacity and give a finite max cap so capacity binds correctly.
+        "ResidualCapacity": residual_capacity,
+        "TotalAnnualMaxCapacity": total_annual_max_capacity,
+        "CapacityOfOneTechnologyUnit": capacity_per_unit,
+        "CapacityToActivityUnit": capacity_to_activity,
+        "YearSplit": yearsplit,
+    }
+    # Include both names to avoid sheet-name mismatches
+    sheets["AvailabilityFactor"] = capacity_factor.copy()
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with pd.ExcelWriter(out_path) as writer:
+        for name, df in sheets.items():
+            df.to_excel(writer, sheet_name=name, index=False)
+    print(f"Wrote dummy workbook to {out_path}")
+
+
+def dummy_main(out_path: str | Path | None = None):
+    """
+    Entrypoint usable both from CLI and notebooks.
+    - If a path argument is provided, use it.
+    - Otherwise, default to ../data/dummy_osemosys.xlsx relative to cwd (works in notebooks).
+    """
+    default_path = Path("../data/dummy_osemosys.xlsx")
+
+    # If caller passed a notebook/kernel flag like "--f=...", ignore it.
+    if out_path is not None and str(out_path).startswith("-"):
+        out_path = None
+
+    if out_path is None:
+        cli_paths = [Path(a) for a in sys.argv[1:] if not a.startswith("-")]
+        out_path = cli_paths[0] if cli_paths else default_path
+
+    make_dummy_workbook(Path(out_path))
+
+
+__all__ = [
+    "ensure_template_db",
+    "trim_db_years_in_place",
+    "maybe_handle_storage_test",
+    "analyze_log",
+    "parse_years",
+    "run_diagnostics",
+    "make_dummy_workbook",
+    "dummy_main",
+    "DEFAULTS",
+    "apply_defaults",
+]
+
+
+# ---------------------------------------------------------------------------
+# Default configuration (less frequently tweaked)
+# ---------------------------------------------------------------------------
+DEFAULTS = {
+    # Paths (override in main if needed)
+    "TEMPLATE_DB": "nemo_template.sqlite",
+    "OUTPUT_DB": "nemo.sqlite",
+    # Units
+    "TARGET_UNITS": {"energy": "PJ", "power": "GW"},
+    # Transmission / demand fuel handling
+    "ENABLE_NEMO_TRANSMISSION_METHODS": False,
+    "REMAP_DEMAND_FUELS_AND_STRIP_TRANSMISSION_TECHS": False,
+    # Storage test
+    "USE_STORAGE_TEST_DB": False,
+    "STORAGE_TEST_DB": "storage_test.sqlite",
+    "STORAGE_TEST_EXCEL_PATH": "nemo_entry_dump.xlsx",
+    # Template creation
+    "AUTO_CREATE_TEMPLATE_DB": True,
+    # Diagnostics
+    "RUN_DIAGNOSTICS": True,
+    "AUTO_FILL_MISSING_MODES": True,
+    "STRICT_ERRORS": True,
+    # LEAP export
+    "GENERATE_LEAP_TEMPLATE": True,
+    "LEAP_TEMPLATE_OUTPUT": "leap_import_template.xlsx",
+    "LEAP_TEMPLATE_REGION": None,
+    "LEAP_IMPORT_ID_SOURCE": None,
+    # NEMO / Julia
+    "JULIA_EXE": r"C:\\ProgramData\\Julia\\Julia-1.9.3\\bin\\julia.exe",
+}
+
+
+def apply_defaults(user_vars: dict, data_dir: Path) -> dict:
+    """Fill in less-frequently changed defaults into user_vars, resolving paths via data_dir where needed."""
+    out = dict(user_vars)
+    out.setdefault("TEMPLATE_DB", data_dir / DEFAULTS["TEMPLATE_DB"])
+    out.setdefault("OUTPUT_DB", data_dir / DEFAULTS["OUTPUT_DB"])
+    out.setdefault("TARGET_UNITS", DEFAULTS["TARGET_UNITS"])
+    out.setdefault("ENABLE_NEMO_TRANSMISSION_METHODS", DEFAULTS["ENABLE_NEMO_TRANSMISSION_METHODS"])
+    out.setdefault("REMAP_DEMAND_FUELS_AND_STRIP_TRANSMISSION_TECHS", DEFAULTS["REMAP_DEMAND_FUELS_AND_STRIP_TRANSMISSION_TECHS"])
+    out.setdefault("USE_STORAGE_TEST_DB", DEFAULTS["USE_STORAGE_TEST_DB"])
+    out.setdefault("STORAGE_TEST_DB", data_dir / DEFAULTS["STORAGE_TEST_DB"])
+    out.setdefault("STORAGE_TEST_EXCEL_PATH", data_dir / DEFAULTS["STORAGE_TEST_EXCEL_PATH"])
+    out.setdefault("AUTO_CREATE_TEMPLATE_DB", DEFAULTS["AUTO_CREATE_TEMPLATE_DB"])
+    out.setdefault("JULIA_EXE", DEFAULTS["JULIA_EXE"])
+    out.setdefault("RUN_DIAGNOSTICS", DEFAULTS["RUN_DIAGNOSTICS"])
+    out.setdefault("AUTO_FILL_MISSING_MODES", DEFAULTS["AUTO_FILL_MISSING_MODES"])
+    out.setdefault("STRICT_ERRORS", DEFAULTS["STRICT_ERRORS"])
+    out.setdefault("GENERATE_LEAP_TEMPLATE", DEFAULTS["GENERATE_LEAP_TEMPLATE"])
+    out.setdefault("LEAP_TEMPLATE_OUTPUT", data_dir / DEFAULTS["LEAP_TEMPLATE_OUTPUT"])
+    out.setdefault("LEAP_TEMPLATE_REGION", DEFAULTS["LEAP_TEMPLATE_REGION"])
+    out.setdefault("LEAP_IMPORT_ID_SOURCE", DEFAULTS["LEAP_IMPORT_ID_SOURCE"])
+    return out

@@ -1,111 +1,51 @@
 #%%
 from pathlib import Path
-import sqlite3
 
 from convert_osemosys_input_to_nemo import (
     convert_osemosys_input_to_nemo,
     dump_db_to_entry_excel,
     PARAM_SPECS,
 )
-from run_nemo_via_julia import create_template_db, run_nemo_on_db
-from diagnostics import run_diagnostics
-from make_dummy_nemo_input import make_dummy_workbook
+from build_leap_import_template import generate_leap_template
+from run_nemo_via_julia import run_nemo_on_db
+from nemo_core import (
+    ensure_template_db,
+    trim_db_years_in_place,
+    maybe_handle_storage_test,
+    run_diagnostics,
+    make_dummy_workbook,
+    apply_defaults,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "data"
+LOG_DIR = PROJECT_ROOT / "results" / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # -------------------------------------------------------------------
 # USER CONFIGURATION
 # -------------------------------------------------------------------
-VARS = {
-    "INPUT_MODE": "nemo_entry",  # "osemosys" or "nemo_entry"
-    "OSEMOSYS_EXCEL_PATH": DATA_DIR / "POWER 20_USA_data_REF9_S3_test.xlsx",
+USER_VARS = {
+    "INPUT_MODE": "nemo_entry",  # "osemosys" or "nemo_entry".. Note that this is normally set manually as an override at the bottom in the main() function call.
+    "OSEMOSYS_EXCEL_PATH": DATA_DIR / "POWER 20_USA_data_REF9_S3_test - new file.xlsx",
     "NEMO_ENTRY_EXCEL_PATH": DATA_DIR / "nemo_entry_dump.xlsx",
-    "TEMPLATE_DB": DATA_DIR / "nemo_template.sqlite",
-    "OUTPUT_DB": DATA_DIR / "nemo.sqlite",
-    # Target units for automatic scaling (energy defaults to PJ to keep magnitudes moderate)
-    "TARGET_UNITS": {
-        "energy": "PJ",
-        "power": "MW",
-    },
-    # Optional: point directly at a ready-made NEMO DB (e.g., NEMO storage test).
-    "USE_STORAGE_TEST_DB": False,
-    "STORAGE_TEST_DB": DATA_DIR / "storage_test.sqlite",
-    "EXPORT_STORAGE_TEST_TO_EXCEL": True,
-    "STORAGE_TEST_EXCEL_PATH": DATA_DIR / "nemo_entry_dump.xlsx",
-    ########
-
+    # Scenario/name
     "SCENARIO": "Reference",
-    "AUTO_CREATE_TEMPLATE_DB": True,
-    "USE_ADVANCED": {
-        "ReserveMargin": True,
-        "AnnualEmissionLimit": True,
-    },
-    # Export the populated NEMO DB to an Excel workbook in the NEMO format (one sheet per table).
+    # Export populated NEMO DB to Excel
     "EXPORT_DB_TO_EXCEL": True,
     "EXPORT_EXCEL_PATH": DATA_DIR / "nemo_entry_dump.xlsx",
-    # Restrict export to a subset of tables/sheets (None -> all in PARAM_SPECS).
-    "EXPORT_TABLE_FILTER": None,
-    # Limit rows per table when exporting (None -> all rows).
-    "EXPORT_MAX_ROWS": None,
-    # Optional: set to the Julia executable path; if None, will look at env JULIA_EXE/NEMO_JULIA_EXE or PATH.
-    "JULIA_EXE": r"C:\ProgramData\Julia\Julia-1.9.3\bin\julia.exe",
-    # Diagnostics
-    "RUN_DIAGNOSTICS": True,  # run a read-only health report on the DB
-    # YEARS_TO_USE trims the DB in-place to these years after conversion and before running NEMO/diagnostics.
-    # Set to None to keep all years. Example: [2017, 2018]
-    "YEARS_TO_USE": [y for y in range(2017, 2031)],
-    "AUTO_FILL_MISSING_MODES": True,
-    "STRICT_ERRORS": True,
+    # Years to use (None keeps all)
+    "YEARS_TO_USE": [y for y in range(2017, 2020)],
+    # LEAP template export
+    "GENERATE_LEAP_TEMPLATE": True,
+    "LEAP_TEMPLATE_OUTPUT": DATA_DIR / "leap_import_template.xlsx",
+    "LEAP_TEMPLATE_REGION": None,  # Override region for LEAP export; None uses defaults in builder.
+    "LEAP_IMPORT_ID_SOURCE": None,  # Optional path to existing LEAP import for ID reuse.
 }
 
-
-def ensure_template_db(template_path: Path, auto_create: bool, julia_exe: str | Path | None):
-    """
-    Make sure the NEMO template DB exists; optionally create it with Julia if missing.
-    """
-    template_path = Path(template_path)
-    if template_path.exists():
-        return
-    if not auto_create:
-        raise FileNotFoundError(
-            f"Template DB '{template_path}' not found. "
-            "Set AUTO_CREATE_TEMPLATE_DB=True to build it automatically."
-        )
-    create_template_db(template_path, julia_exe=julia_exe)
-
-
-def trim_db_years_in_place(db_path: Path, years: list[int]):
-    """
-    Remove rows from all tables that have a 'y' column for years not in the list.
-    Updates YEAR table to match. Operates in-place.
-    """
-    years = sorted({int(y) for y in years})
-    if not years:
-        return
-    years_param = ",".join("?" * len(years))
-    with sqlite3.connect(db_path) as conn:
-        cur = conn.cursor()
-        tables = [
-            r[0]
-            for r in cur.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-            ).fetchall()
-        ]
-        for tbl in tables:
-            info = cur.execute(f'PRAGMA table_info("{tbl}")').fetchall()
-            cols = [c[1] for c in info]
-            if "y" not in cols:
-                continue
-            cur.execute(
-                f'DELETE FROM "{tbl}" WHERE y NOT IN ({years_param})',
-                tuple(years),
-            )
-        if "YEAR" in tables:
-            cur.execute(f'DELETE FROM "YEAR" WHERE val NOT IN ({years_param})', tuple(years))
-        conn.commit()
-
+# Merge in less-frequently changed defaults (paths resolved relative to DATA_DIR where applicable)
+VARS = apply_defaults(USER_VARS, DATA_DIR)
 
 def main(mode: str | None = None, run_nemo: bool = True):
     """
@@ -118,28 +58,7 @@ def main(mode: str | None = None, run_nemo: bool = True):
     mode = (mode or "osemosys_input").lower()
 
     # Handle storage test (skip conversion)
-    if VARS.get("USE_STORAGE_TEST_DB"):
-        db_path = Path(VARS.get("STORAGE_TEST_DB", DATA_DIR / "storage_test.sqlite"))
-        if not db_path.exists():
-            raise FileNotFoundError(f"Storage test DB not found at '{db_path}'")
-        if VARS.get("EXPORT_STORAGE_TEST_TO_EXCEL"):
-            dump_db_to_entry_excel(
-                db_path=db_path,
-                excel_path=Path(
-                    VARS.get("STORAGE_TEST_EXCEL_PATH", DATA_DIR / "storage_test_dump.xlsx")
-                ),
-                specs=PARAM_SPECS,
-                tables=VARS.get("EXPORT_TABLE_FILTER"),
-                max_rows=VARS.get("EXPORT_MAX_ROWS"),
-                use_advanced=VARS.get("USE_ADVANCED"),
-            )
-        if run_nemo:
-            run_nemo_on_db(
-                db_path,
-                julia_exe=VARS.get("JULIA_EXE"),
-                log_path=DATA_DIR / "nemo_run.log",
-                stream_output=True,
-            )
+    if maybe_handle_storage_test(VARS, DATA_DIR, LOG_DIR, run_nemo):
         return
 
     # Ensure template DB exists
@@ -183,8 +102,17 @@ def main(mode: str | None = None, run_nemo: bool = True):
         run_nemo_on_db(
             db_path,
             julia_exe=VARS.get("JULIA_EXE"),
-            log_path=DATA_DIR / "nemo_run.log",
+            log_path=LOG_DIR / "nemo_run.log",
             stream_output=True,
+        )
+    if VARS.get("GENERATE_LEAP_TEMPLATE"):
+        breakpoint()#how is this going to work>
+        generate_leap_template(
+            scenario=VARS.get("SCENARIO"),
+            region=VARS.get("LEAP_TEMPLATE_REGION"),
+            nemo_db_path=db_path,
+            output_path=VARS.get("LEAP_TEMPLATE_OUTPUT"),
+            import_id_source=VARS.get("LEAP_IMPORT_ID_SOURCE"),
         )
 
 #%%

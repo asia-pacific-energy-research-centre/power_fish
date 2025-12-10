@@ -465,6 +465,29 @@ def _detect_year_table(conn) -> tuple[str | None, str | None]:
 
 
 # -------------------------------------------------------------------
+# Value coercion helpers
+# -------------------------------------------------------------------
+def _coerce_scalar(val):
+    """
+    Coerce SQLite/Excel scalars to plain Python numbers where possible.
+    Handles bytes blobs that represent little-endian integers (e.g., OperationalLife).
+    """
+    if isinstance(val, (bytes, bytearray)):
+        try:
+            return int.from_bytes(val, byteorder="little", signed=True)
+        except Exception:
+            return val
+    return val
+
+
+def _coerce_df_scalars(df: pd.DataFrame) -> pd.DataFrame:
+    """Apply _coerce_scalar elementwise."""
+    if df.empty:
+        return df
+    return df.applymap(_coerce_scalar)
+
+
+# -------------------------------------------------------------------
 # Units handling
 # -------------------------------------------------------------------
 # Scaling factors to target units
@@ -668,6 +691,7 @@ def dump_db_to_entry_excel(
             if spec.get("raw"):
                 try:
                     wide_df = pd.read_sql_query(f'SELECT * FROM "{table_name}"', conn)
+                    wide_df = _coerce_df_scalars(wide_df)
                     rename_map = {k: INDEX_NAME_MAP_REV.get(k, k) for k in wide_df.columns}
                     wide_df = wide_df.rename(columns=rename_map)
                 except Exception:
@@ -675,6 +699,7 @@ def dump_db_to_entry_excel(
             elif not spec.get("has_years", True):
                 try:
                     wide_df = pd.read_sql_query(f'SELECT * FROM "{table_name}"', conn)
+                    wide_df = _coerce_df_scalars(wide_df)
                     rename_map = {k: INDEX_NAME_MAP_REV.get(k, k) for k in wide_df.columns}
                     wide_df = wide_df.rename(columns=rename_map)
                     if "VALUE" not in wide_df.columns and "val" in wide_df.columns:
@@ -795,6 +820,116 @@ def _backfill_capacity_unit_years(conn: sqlite3.Connection):
     conn.commit()
     print(f"Backfilled CapacityOfOneTechnologyUnit for years; added {len(new_rows)} rows.")
 
+
+def _ensure_minimal_transmission(conn: sqlite3.Connection):
+    """
+    If transmission tables are empty, populate a minimal single-node setup:
+      - One NODE per REGION
+      - NodalDistributionDemand: 100% of each demand assigned to that node
+      - NodalDistributionTechnologyCapacity: 100% of each tech/year to that node
+      - TransmissionModelingEnabled: set to 1
+    This avoids transmission infeasibilities when no nodal data is provided.
+    """
+    cur = conn.cursor()
+    try:
+        nodes_existing = cur.execute('SELECT COUNT(*) FROM "NODE"').fetchone()[0]
+    except Exception:
+        return  # transmission tables not present
+    if nodes_existing:
+        return  # already populated
+
+    regions = [r[0] for r in cur.execute('SELECT val FROM "REGION"').fetchall()]
+    years = [y[0] for y in cur.execute('SELECT val FROM "YEAR"').fetchall()]
+    if not regions or not years:
+        return
+
+    # One node per region (store region in r column if present)
+    cur.executemany('INSERT INTO "NODE" (val, r) VALUES (?, ?)', [(r, r) for r in regions])
+
+    # NodalDistributionDemand: assign 1.0 to the region's node
+    try:
+        demand_rows = cur.execute('SELECT DISTINCT r, f, y FROM "SpecifiedAnnualDemand"').fetchall()
+    except Exception:
+        demand_rows = []
+    ndemand = [(r, f, y, 1.0) for r, f, y in demand_rows]
+    if ndemand:
+        cur.executemany(
+            'INSERT INTO "NodalDistributionDemand" (n, f, y, val) VALUES (?, ?, ?, ?)',
+            ndemand,
+        )
+
+    # NodalDistributionTechnologyCapacity: assign 1.0 to the region's node for each tech/year
+    techs = [t[0] for t in cur.execute('SELECT val FROM "TECHNOLOGY"').fetchall()]
+    ntcap = []
+    for r in regions:
+        for t in techs:
+            for y in years:
+                ntcap.append((r, t, y, 1.0))
+    if ntcap:
+        cur.executemany(
+            'INSERT INTO "NodalDistributionTechnologyCapacity" (n, t, y, val) VALUES (?, ?, ?, ?)',
+            ntcap,
+        )
+
+    # TransmissionModelingEnabled: set to 1
+    try:
+        cur.execute('INSERT INTO "TransmissionModelingEnabled" (val) VALUES (1)')
+    except Exception:
+        pass
+
+    conn.commit()
+    print(f"Populated minimal transmission tables for {len(regions)} nodes.")
+
+
+def _disable_transmission(conn: sqlite3.Connection):
+    """Disable transmission modeling if the table exists."""
+    cur = conn.cursor()
+    try:
+        cur.execute('DELETE FROM "TransmissionModelingEnabled"')
+        cur.execute('INSERT INTO "TransmissionModelingEnabled" (val) VALUES (0)')
+        conn.commit()
+    except Exception:
+        # table may not exist; ignore
+        return
+
+
+def _strip_transmission_techs(conn: sqlite3.Connection):
+    """
+    Remove legacy transmission-as-technology rows for a known list of techs.
+    """
+    techs = [
+        "POW_Transmission",
+        "POW_Transmission_Heat",
+        "POW_TRN_BATT",
+        "POW_TRN_DAM",
+    ]
+    tables = [
+        "CapacityToActivityUnit",
+        "OperationalLife",
+        "InputActivityRatio",
+        "OutputActivityRatio",
+        "CapitalCost",
+        "FixedCost",
+        "VariableCost",
+        "AvailabilityFactor",
+        "ResidualCapacity",
+        "TotalAnnualMaxCapacity",
+        "TotalAnnualMinCapacity",
+        "TotalTechnologyAnnualActivityUpperLimit",
+        "TotalTechnologyAnnualActivityLowerLimit",
+        "ReserveMarginTagTechnology",
+    ]
+    cur = conn.cursor()
+    for tbl in tables:
+        try:
+            cur.execute(
+                f'DELETE FROM "{tbl}" WHERE t IN ({",".join(["?"]*len(techs))})',
+                techs,
+            )
+        except Exception:
+            continue
+    conn.commit()
+
 # -------------------------------------------------------------------
 # MAIN
 # -------------------------------------------------------------------
@@ -834,10 +969,12 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any]):
     template_db = Path(config["TEMPLATE_DB"])
     output_db = Path(config["OUTPUT_DB"])
     SCENARIO = str(config["SCENARIO"])
-    use_advanced = dict(config.get("USE_ADVANCED") or {})
+    use_advanced = dict(config.get("USE_ADVANCED") or {"ReserveMargin": True, "AnnualEmissionLimit": True})
     target_units_cfg = dict(config.get("TARGET_UNITS") or {})
     target_energy_unit = target_units_cfg.get("energy", DEFAULT_TARGET_UNITS["energy"])
     target_power_unit = target_units_cfg.get("power", DEFAULT_TARGET_UNITS["power"])
+    enable_transmission = bool(config.get("ENABLE_NEMO_TRANSMISSION_METHODS", True))
+    remap_demand_fuels = bool(config.get("REMAP_DEMAND_FUELS_AND_STRIP_TRANSMISSION_TECHS", False))
     strict_errors = bool(config.get("STRICT_ERRORS", False))
     export_db_to_excel = bool(config.get("EXPORT_DB_TO_EXCEL", False))
     export_excel_path = Path(
@@ -927,6 +1064,11 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any]):
         if "MODE_OF_OPERATION" in df.columns:
             df["MODE_OF_OPERATION"] = df["MODE_OF_OPERATION"].apply(_normalize_mode_value)
 
+        # Optional remap demand fuels (strip suffix like _Dx)
+        if remap_demand_fuels and sheet_name in ("SpecifiedAnnualDemand", "SpecifiedDemandProfile","OutputActivityRatio"):
+            if "FUEL" in df.columns:
+                df["FUEL"] = df["FUEL"].apply(lambda x: str(x).replace("_Dx", "").replace("_DX", ""))  # simple strip
+
         if is_raw:
             # For raw tables, just copy rows directly.
             insert_raw_table(conn, nemo_table, df)
@@ -954,7 +1096,11 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any]):
                 continue
 
             # Build rows & insert
-            rows = build_rows_from_wide(df, indices, year_cols, defaults=spec.get("defaults"))
+            # coerce any bytes in year columns
+            df_years = df.copy()
+            for y_col in year_cols:
+                df_years[y_col] = df_years[y_col].apply(_coerce_scalar)
+            rows = build_rows_from_wide(df_years, indices, year_cols, defaults=spec.get("defaults"))
             insert_rows(conn, nemo_table, rows, indices)
             collected_years.update(int(y) for y in year_cols)
         else:
@@ -962,6 +1108,7 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any]):
             if "VALUE" not in df.columns:
                 print(f"  No VALUE column found in '{sheet_name}'. Skipping.")
                 continue
+            df["VALUE"] = df["VALUE"].apply(_coerce_scalar)
             # Normalize index values to string
             df_indices = df[indices].copy()
             for idx in indices:
@@ -1000,6 +1147,12 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any]):
         populate_year_table(conn)
 
     _backfill_capacity_unit_years(conn)
+    if enable_transmission:
+        _ensure_minimal_transmission(conn)
+    else:
+        _disable_transmission(conn)
+    if config.get("REMAP_DEMAND_FUELS_AND_STRIP_TRANSMISSION_TECHS"):
+        _strip_transmission_techs(conn)
 
     # Cross-check modes and YearSplit consistency
     cur = conn.cursor()
