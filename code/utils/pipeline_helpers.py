@@ -6,7 +6,7 @@ from convert_osemosys_input_to_nemo import dump_db_to_entry_excel, PARAM_SPECS
 from run_nemo_via_julia import run_nemo_on_db
 
 
-def maybe_handle_storage_test(vars_cfg: dict, data_dir: Path, run_nemo: bool) -> bool:
+def handle_storage_test(vars_cfg: dict, data_dir: Path, run_nemo: bool) -> bool:
     """
     Handle the storage test shortcut (skip conversion) if enabled.
     Returns True if the flow was handled and the caller should exit early.

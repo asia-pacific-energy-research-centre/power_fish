@@ -36,6 +36,11 @@ PARAM_SPECS = {
         "indices": ["REGION", "TECHNOLOGY", "TIMESLICE"],
         "filter_scenario": False,
     },
+    "AvailabilityFactor": {
+        "nemo_table": "AvailabilityFactor",
+        "indices": ["REGION", "TECHNOLOGY", "TIMESLICE"],
+        "filter_scenario": False,
+    },
     "CapacityOfOneTechnologyUnit": {
         "nemo_table": "CapacityOfOneTechnologyUnit",
         "indices": ["REGION", "TECHNOLOGY"],
@@ -650,16 +655,13 @@ def dump_db_to_entry_excel(
     excel_path: Path,
     specs: dict,
     tables: list[str] | None = None,
-    max_rows: int | None = None,
-    use_advanced: Mapping[str, bool] | None = None,
 ):
     """
     Export DB to an Excel workbook for data entry:
-    - One sheet per spec in PARAM_SPECS (respecting USE_ADVANCED and filter).
+    - One sheet per spec in PARAM_SPECS.
     - Verbose column names (REGION, TECHNOLOGY, ...).
     - Years pivoted into columns.
     """
-    use_advanced = use_advanced or {}
     conn = sqlite3.connect(db_path)
     all_years = _fetch_years(conn)
 
@@ -679,10 +681,6 @@ def dump_db_to_entry_excel(
 
     with pd.ExcelWriter(excel_path) as writer:
         for sheet_name, spec in specs.items():
-            adv_flag = spec.get("advanced_flag", None)
-            if adv_flag is not None and not use_advanced.get(adv_flag, False):
-                continue
-
             table_name = spec["nemo_table"]
             if allowed and table_name not in allowed and sheet_name not in allowed:
                 continue
@@ -713,7 +711,7 @@ def dump_db_to_entry_excel(
                     sheet_name=sheet_name,
                     indices_verbose=indices_verbose,
                     all_years=all_years,
-                    max_rows=max_rows,
+                    max_rows=None,
                 )
 
             out_sheet = unique_sheet_name(sheet_name)
@@ -943,9 +941,8 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any]):
       - TEMPLATE_DB: empty NEMO template database
       - OUTPUT_DB: destination database that will be overwritten
       - SCENARIO: scenario label used when filtering sheets
-      - USE_ADVANCED: dict of feature flags (e.g., {"ReserveMargin": True})
       - EXPORT_DB_TO_EXCEL: whether to dump the populated DB back to Excel
-      - EXPORT_EXCEL_PATH: target path for the dump if enabled
+      - EXPORT_DB_TO_EXCEL_PATH: target path for the dump if enabled
       - EXPORT_TABLE_FILTER / EXPORT_MAX_ROWS: optional export limits
     """
     required_keys = [
@@ -969,7 +966,6 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any]):
     template_db = Path(config["TEMPLATE_DB"])
     output_db = Path(config["OUTPUT_DB"])
     SCENARIO = str(config["SCENARIO"])
-    use_advanced = dict(config.get("USE_ADVANCED") or {"ReserveMargin": True, "AnnualEmissionLimit": True})
     target_units_cfg = dict(config.get("TARGET_UNITS") or {})
     target_energy_unit = target_units_cfg.get("energy", DEFAULT_TARGET_UNITS["energy"])
     target_power_unit = target_units_cfg.get("power", DEFAULT_TARGET_UNITS["power"])
@@ -977,15 +973,18 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any]):
     remap_demand_fuels = bool(config.get("REMAP_DEMAND_FUELS_AND_STRIP_TRANSMISSION_TECHS", False))
     strict_errors = bool(config.get("STRICT_ERRORS", False))
     export_db_to_excel = bool(config.get("EXPORT_DB_TO_EXCEL", False))
-    export_excel_path = Path(
-        config.get("EXPORT_EXCEL_PATH", output_db.with_suffix(".xlsx"))
+    EXPORT_DB_TO_EXCEL_PATH = Path(
+        config.get("EXPORT_DB_TO_EXCEL_PATH", output_db.with_suffix(".xlsx"))
     )
     export_table_filter = config.get("EXPORT_TABLE_FILTER", None)
-    export_max_rows = config.get("EXPORT_MAX_ROWS", None)
 
     excel_path = osemosys_excel_path if input_mode == "osemosys" else nemo_entry_excel_path
 
     print(f"Reading input workbook ({input_mode}) from '{excel_path}'.")
+    try:
+        available_sheets = set(pd.ExcelFile(excel_path).sheet_names)
+    except Exception:
+        available_sheets = set()
     output_db.parent.mkdir(parents=True, exist_ok=True)
     copy_template_db(template_db, output_db)
     conn = sqlite3.connect(output_db)
@@ -1019,11 +1018,9 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any]):
         filter_scen = spec.get("filter_scenario", False)
         adv_flag = spec.get("advanced_flag", None)
 
-        # If this is an advanced param and its switch is off, skip
-        if adv_flag is not None and not use_advanced.get(adv_flag, False):
-            print(
-                f"\nSkipping advanced parameter '{sheet_name}' (flag {adv_flag}=False)."
-            )
+        # Prefer AvailabilityFactor sheet when present; skip CapacityFactor to avoid duplicates.
+        if sheet_name == "CapacityFactor" and "AvailabilityFactor" in available_sheets:
+            print("AvailabilityFactor sheet present; skipping CapacityFactor sheet to avoid duplicate imports.")
             continue
 
         print(f"\nProcessing sheet '{sheet_name}' -> table '{nemo_table}'")
@@ -1199,11 +1196,9 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any]):
     if export_db_to_excel:
         dump_db_to_entry_excel(
             output_db,
-            export_excel_path,
+            EXPORT_DB_TO_EXCEL_PATH,
             specs=PARAM_SPECS,
             tables=export_table_filter,
-            max_rows=export_max_rows,
-            use_advanced=use_advanced,
         )
 
 

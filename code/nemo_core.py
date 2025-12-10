@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """
 Core utilities for the NEMO pipeline: template DB helpers, storage test flow,
-log analysis, diagnostics, and dummy workbook generation.
+log analysis, diagnostics, dummy workbook generation, and shared defaults.
 """
 
 from pathlib import Path
@@ -54,15 +54,18 @@ def trim_db_years_in_place(db_path: Path, years: list[int]):
             if "y" not in cols:
                 continue
             cur.execute(
-                f'DELETE FROM \"{tbl}\" WHERE y NOT IN ({years_param})',
+                f'DELETE FROM "{tbl}" WHERE y NOT IN ({years_param})',
                 tuple(years),
             )
         if "YEAR" in tables:
-            cur.execute(f'DELETE FROM \"YEAR\" WHERE val NOT IN ({years_param})', tuple(years))
+            cur.execute(f'DELETE FROM "YEAR" WHERE val NOT IN ({years_param})', tuple(years))
         conn.commit()
 
 
-def maybe_handle_storage_test(vars_cfg: dict, data_dir: Path, log_dir: Path, run_nemo: bool) -> bool:
+# ---------------------------------------------------------------------------
+# Storage test flow
+# ---------------------------------------------------------------------------
+def handle_storage_test(vars_cfg: dict, data_dir: Path, log_dir: Path, run_nemo: bool) -> bool:
     """
     Handle the storage test shortcut (skip conversion) if enabled.
     Returns True if the flow was handled and the caller should exit early.
@@ -92,6 +95,39 @@ def maybe_handle_storage_test(vars_cfg: dict, data_dir: Path, log_dir: Path, run
             stream_output=True,
         )
     return True
+
+
+# ---------------------------------------------------------------------------
+# Main flow preparation
+# ---------------------------------------------------------------------------
+def prepare_run_context(vars_cfg: dict, data_dir: Path, mode: str, log_dir: Path) -> dict:
+    """
+    Ensure template DB exists and configure mode-specific paths/inputs.
+    Returns an updated vars dict.
+    """
+    ensure_template_db(
+        vars_cfg["TEMPLATE_DB"],
+        auto_create=bool(vars_cfg.get("AUTO_CREATE_TEMPLATE_DB", False)),
+        julia_exe=vars_cfg.get("JULIA_EXE"),
+    )
+
+    updated = dict(vars_cfg)
+    if mode == "dummy":
+        updated["INPUT_MODE"] = "osemosys"
+        updated["OSEMOSYS_EXCEL_PATH"] = data_dir / "dummy_osemosys.xlsx"
+        updated["NEMO_ENTRY_EXCEL_PATH"] = data_dir / "dummy_nemo.xlsx"
+        updated["EXPORT_DB_TO_EXCEL_PATH"] = data_dir / "dummy_nemo.xlsx"
+        updated["OUTPUT_DB"] = data_dir / "dummy_nemo.sqlite"
+        make_dummy_workbook(updated["OSEMOSYS_EXCEL_PATH"])
+    elif mode == "nemo_input":
+        updated["INPUT_MODE"] = "nemo_entry"
+    elif mode == "osemosys_input":
+        updated["INPUT_MODE"] = "osemosys"
+    else:
+        raise ValueError(f"Unknown MODE '{mode}'")
+
+    log_dir.mkdir(parents=True, exist_ok=True)
+    return updated
 
 
 # ---------------------------------------------------------------------------
@@ -497,20 +533,6 @@ def dummy_main(out_path: str | Path | None = None):
     make_dummy_workbook(Path(out_path))
 
 
-__all__ = [
-    "ensure_template_db",
-    "trim_db_years_in_place",
-    "maybe_handle_storage_test",
-    "analyze_log",
-    "parse_years",
-    "run_diagnostics",
-    "make_dummy_workbook",
-    "dummy_main",
-    "DEFAULTS",
-    "apply_defaults",
-]
-
-
 # ---------------------------------------------------------------------------
 # Default configuration (less frequently tweaked)
 # ---------------------------------------------------------------------------
@@ -564,3 +586,19 @@ def apply_defaults(user_vars: dict, data_dir: Path) -> dict:
     out.setdefault("LEAP_TEMPLATE_REGION", DEFAULTS["LEAP_TEMPLATE_REGION"])
     out.setdefault("LEAP_IMPORT_ID_SOURCE", DEFAULTS["LEAP_IMPORT_ID_SOURCE"])
     return out
+
+
+__all__ = [
+    "ensure_template_db",
+    "trim_db_years_in_place",
+    "handle_storage_test",
+    "prepare_run_context",
+    "analyze_log",
+    "parse_years",
+    "run_diagnostics",
+    "make_dummy_workbook",
+    "dummy_main",
+    "DEFAULTS",
+    "apply_defaults",
+]
+
