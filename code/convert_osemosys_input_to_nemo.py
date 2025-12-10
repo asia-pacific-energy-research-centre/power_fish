@@ -967,6 +967,7 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any]):
     output_db = Path(config["OUTPUT_DB"])
     SCENARIO = str(config["SCENARIO"])
     target_units_cfg = dict(config.get("TARGET_UNITS") or {})
+    use_unit_conversion = bool(config.get("USE_UNIT_CONVERSION", True))
     target_energy_unit = target_units_cfg.get("energy", DEFAULT_TARGET_UNITS["energy"])
     target_power_unit = target_units_cfg.get("power", DEFAULT_TARGET_UNITS["power"])
     enable_transmission = bool(config.get("ENABLE_NEMO_TRANSMISSION_METHODS", True))
@@ -1080,10 +1081,11 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any]):
 
         # Optional unit conversion
         unit_type = spec.get("unit_type")
-        if unit_type == "energy":
-            df = convert_units(df, "energy", target_energy_unit, warnings, sheet_name=sheet_name)
-        elif unit_type == "power":
-            df = convert_units(df, "power", target_power_unit, warnings, sheet_name=sheet_name)
+        if use_unit_conversion:
+            if unit_type == "energy":
+                df = convert_units(df, "energy", target_energy_unit, warnings, sheet_name=sheet_name)
+            elif unit_type == "power":
+                df = convert_units(df, "power", target_power_unit, warnings, sheet_name=sheet_name)
 
         if has_years:
             # Identify year columns

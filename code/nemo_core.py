@@ -542,6 +542,7 @@ DEFAULTS = {
     "OUTPUT_DB": "nemo.sqlite",
     # Units
     "TARGET_UNITS": {"energy": "PJ", "power": "GW"},
+    "USE_UNIT_CONVERSION": False,
     # Transmission / demand fuel handling
     "ENABLE_NEMO_TRANSMISSION_METHODS": False,
     "REMAP_DEMAND_FUELS_AND_STRIP_TRANSMISSION_TECHS": False,
@@ -571,6 +572,7 @@ def apply_defaults(user_vars: dict, data_dir: Path) -> dict:
     out.setdefault("TEMPLATE_DB", data_dir / DEFAULTS["TEMPLATE_DB"])
     out.setdefault("OUTPUT_DB", data_dir / DEFAULTS["OUTPUT_DB"])
     out.setdefault("TARGET_UNITS", DEFAULTS["TARGET_UNITS"])
+    out.setdefault("USE_UNIT_CONVERSION", DEFAULTS["USE_UNIT_CONVERSION"])
     out.setdefault("ENABLE_NEMO_TRANSMISSION_METHODS", DEFAULTS["ENABLE_NEMO_TRANSMISSION_METHODS"])
     out.setdefault("REMAP_DEMAND_FUELS_AND_STRIP_TRANSMISSION_TECHS", DEFAULTS["REMAP_DEMAND_FUELS_AND_STRIP_TRANSMISSION_TECHS"])
     out.setdefault("USE_STORAGE_TEST_DB", DEFAULTS["USE_STORAGE_TEST_DB"])
@@ -601,4 +603,3 @@ __all__ = [
     "DEFAULTS",
     "apply_defaults",
 ]
-
