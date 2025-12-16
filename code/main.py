@@ -103,7 +103,7 @@ def main(mode: str | None = None, run_nemo: bool = True):
         cfg = prepare_run_context(cfg, DATA_DIR, mode, LOG_DIR)
 
         # Convert (handles both osemosys and nemo_entry)
-        convert_osemosys_input_to_nemo(cfg)
+        convert_osemosys_input_to_nemo(cfg, VERBOSE_ERRORS=True)
         db_path = Path(cfg["OUTPUT_DB"])
 
     # Optional year trim and diagnostics
@@ -142,6 +142,6 @@ def main(mode: str | None = None, run_nemo: bool = True):
 #     # "test",  # test a DB flow set by NEMO_TEST_NAME
 # 
 if __name__ == "__main__":
-    main('nemo_input_xlsx')
+    main('osemosys_input_xlsx')
 
 # %%

@@ -42,7 +42,7 @@ function main()
 
     println("------------------------------------------------")
     println("NEMO run started at: ", Dates.now())
-    println("Scenario database:   ", dbpath)
+    println("Input database:   ", dbpath)
     println("------------------------------------------------")
 
     # Define the solver model (default Cbc; set NEMO_SOLVER=highs to try HiGHS)

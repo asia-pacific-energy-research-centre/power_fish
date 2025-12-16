@@ -382,6 +382,76 @@ def _cleanup_unused_sets(conn: sqlite3.Connection):
     conn.commit()
 
 
+def _ensure_set_tables_from_params(conn: sqlite3.Connection):
+    """
+    Rebuild set tables from the distinct values found across parameter tables.
+    Useful when the source workbook has no dedicated set sheets and cleanup removed all rows.
+    """
+    cur = conn.cursor()
+    set_targets = {
+        "r": "REGION",
+        "t": "TECHNOLOGY",
+        "f": "FUEL",
+        "l": "TIMESLICE",
+        "e": "EMISSION",
+        "m": "MODE_OF_OPERATION",
+    }
+    collected: DefaultDict[str, set[str]] = defaultdict(set)
+    collected_years: set[int] = set()
+
+    try:
+        tables = [
+            r[0]
+            for r in cur.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+        ]
+    except Exception:
+        return
+
+    for tbl in tables:
+        # Skip set tables themselves
+        if tbl.upper() in set(set_targets.values()) | {"YEAR"}:
+            continue
+        try:
+            info = cur.execute(f'PRAGMA table_info("{tbl}")').fetchall()
+        except Exception:
+            continue
+        cols = [c[1] for c in info]
+        for col in cols:
+            if col in set_targets:
+                try:
+                    vals = cur.execute(
+                        f'SELECT DISTINCT "{col}" FROM "{tbl}" WHERE "{col}" IS NOT NULL'
+                    ).fetchall()
+                    collected[set_targets[col]].update(str(v[0]) for v in vals if v and v[0] is not None)
+                except Exception:
+                    continue
+            if col == "y":
+                try:
+                    vals = cur.execute(
+                        f'SELECT DISTINCT "{col}" FROM "{tbl}" WHERE "{col}" IS NOT NULL'
+                    ).fetchall()
+                    for v in vals:
+                        try:
+                            collected_years.add(int(v[0]))
+                        except Exception:
+                            continue
+                except Exception:
+                    continue
+
+    for target in set_targets.values():
+        if collected[target]:
+            _insert_set_values(conn, target, collected[target])
+
+    if collected_years:
+        try:
+            cur.execute('DELETE FROM "YEAR"')
+            cur.executemany('INSERT INTO "YEAR" (val) VALUES (?)', [(y,) for y in sorted(collected_years)])
+            conn.commit()
+        except Exception:
+            pass
+
 def _fill_missing_availability(conn: sqlite3.Connection, default_val: float = 1.0):
     """
     Ensure AvailabilityFactor has entries for all timeslices for (region, tech, year) combos
@@ -583,7 +653,12 @@ def _coerce_df_scalars(df: pd.DataFrame) -> pd.DataFrame:
     """Apply _coerce_scalar elementwise."""
     if df.empty:
         return df
-    return df.applymap(_coerce_scalar)
+    # pandas is deprecating applymap; map provides the same elementwise behavior.
+    try:
+        return df.map(_coerce_scalar)
+    except Exception:
+        # Fallback for older pandas that may not have DataFrame.map
+        return df.applymap(_coerce_scalar)
 
 
 # -------------------------------------------------------------------
@@ -1043,7 +1118,7 @@ def _strip_transmission_techs(conn: sqlite3.Connection):
 # -------------------------------------------------------------------
 # MAIN
 # -------------------------------------------------------------------
-def convert_osemosys_input_to_nemo(config: Mapping[str, Any]):
+def convert_osemosys_input_to_nemo(config: Mapping[str, Any], VERBOSE_ERRORS: bool = False):
     """
     Populate a NEMO scenario database from an OSeMOSYS-style Excel workbook.
 
@@ -1187,9 +1262,15 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any]):
         # Warn about missing index values that will be skipped
         for idx in indices:
             if df[idx].isna().any():
+                #if there are full rows of nas, drop them silently
+                df = df[~df.isna().all(axis=1)]
+                
                 warnings.append(
-                    f"{sheet_name}: {df[idx].isna().sum()} rows missing {idx} will be skipped."
+                    f"{sheet_name}: {df[idx].isna().sum()} rows with values missing in {idx} will be skipped."
                 )
+                if VERBOSE_ERRORS:
+                    print(f"  Rows with missing {idx} are:")
+                    print(df[df[idx].isna()])
 
         # Optional unit conversion
         unit_type = spec.get("unit_type")
@@ -1235,7 +1316,7 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any]):
             collected_sets[idx].update(str(v) for v in vals)
         if has_years:
             collected_years.update(int(y) for y in year_cols)
-        
+    # breakpoint()
     # populate set tables (REGION/TECHNOLOGY/FUEL/TIMESLICE/EMISSION) and YEAR
     _insert_set_values(conn, "REGION", collected_sets.get("REGION", set()))
     _insert_set_values(conn, "TECHNOLOGY", collected_sets.get("TECHNOLOGY", set()))
@@ -1260,6 +1341,10 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any]):
 
     # Drop set entries that are not referenced in any parameter table
     _cleanup_unused_sets(conn)
+    # Backstop: if cleanup left set tables empty (e.g., due to missing set sheets),
+    # rebuild them from parameter tables so downstream exports include the set values.
+    _ensure_set_tables_from_params(conn)
+    
     # Fill missing AvailabilityFactor rows across timeslices for existing techs
     _fill_missing_availability(conn)
 
@@ -1304,7 +1389,7 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any]):
     ).fetchall()
     if bad_yearsplits:
         warnings.append(f"YearSplit rows do not sum to 1 for years: {bad_yearsplits[:5]}")
-
+    
     if warnings:
         print("\nWarnings detected during conversion:")
         for w in warnings:

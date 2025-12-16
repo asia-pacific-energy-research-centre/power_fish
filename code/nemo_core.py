@@ -384,7 +384,7 @@ def analyze_log(log_path: Path):
     if not findings:
         findings.append("No obvious errors found.")
 
-    tail = "\\n".join(lines[-30:]) if lines else ""
+    tail = "\n".join(lines[-30:]) if lines else ""
 
     return findings, tail
 
@@ -429,7 +429,7 @@ def trim_years(conn: sqlite3.Connection, years: Sequence[int], tables: Iterable[
 
 
 def _print_section(title: str):
-    print("\\n" + title)
+    print("\n" + title)
     print("-" * len(title))
 
 
