@@ -12,26 +12,70 @@ import pandas as pd
 # -------------------------------------------------------------------
 # User-configurable defaults
 # -------------------------------------------------------------------
-DEFAULT_SCENARIO = "Target"
-CURRENT_ACCOUNTS_SCENARIO = "Current Accounts"
-DEFAULT_REGION = "Region 1"# If None, mirror REGION_FILTER (or scenario if that is also None).
-OUTPUT_PATH = Path("../data/leap_import_template.xlsx")
-IMPORT_ID_SOURCE = Path("../data/import_files/USA_power_leap_import_REF.xlsx")  # Path to an existing LEAP export to copy IDs from (set to None to skip).
-IMPORT_ID_SHEET = "Export"  # Sheet name in the import file.
-IMPORT_ID_HEADER_ROW = 2  # Header row index (0-based) in the import file.
-ID_CHECK_STRICT = True  # If True, raise when IDs are missing after merge.
-ID_CHECK_BREAK = True  # If True, breakpoint() when IDs are missing after merge.
-NEMO_DB_PATH = Path("../data/nemo.sqlite")  # Set to None to skip autofill.
-AUTO_FILL_FROM_DB = True
-DEDUPLICATE_ROWS = True  # Drop duplicate Branch/Variable pairs before filling.
-LEAP_MODEL_NAME = "USA transport"  # Populates the header row; change to your LEAP Area/Model name.
-LEAP_VERSION = "2"  # Populates the Version field in the header row.
-
-# Region/tech mapping used when querying the NEMO DB.
-REGION_FILTER = "20_USA"  # Change if you want another region or set to None to pull all.
-TECH_MAP = {
-    "Coal": "POW_Coal_PP",  # Update to your coal tech code if different.
+LEAP_TEMPLATE_DEFAULTS = {
+    "DEFAULT_SCENARIO": "Target",
+    "CURRENT_ACCOUNTS_SCENARIO": "Current Accounts",
+    "DEFAULT_REGION": "Region 1",  # If None, mirror REGION_FILTER (or scenario if that is also None).
+    "OUTPUT_PATH": Path("../data/leap_import_template.xlsx"),
+    # Path to an existing LEAP export to copy IDs from (set to None to skip).
+    "IMPORT_ID_SOURCE": Path("../data/import_files/USA_power_leap_import_REF.xlsx"),
+    "IMPORT_ID_SHEET": "Export",  # Sheet name in the import file.
+    "IMPORT_ID_HEADER_ROW": 2,  # Header row index (0-based) in the import file.
+    "ID_CHECK_STRICT": True,  # If True, raise when IDs are missing after merge.
+    "ID_CHECK_BREAK": True,  # If True, breakpoint() when IDs are missing after merge.
+    "NEMO_DB_PATH": Path("../data/nemo.sqlite"),  # Set to None to skip autofill.
+    "AUTO_FILL_FROM_DB": True,
+    "DEDUPLICATE_ROWS": True,  # Drop duplicate Branch/Variable pairs before filling.
+    "LEAP_MODEL_NAME": "USA transport",  # Populates the header row; change to your LEAP Area/Model name.
+    "LEAP_VERSION": "2",  # Populates the Version field in the header row.
+    # Region/tech mapping used when querying the NEMO DB.
+    "REGION_FILTER": "20_USA",  # Change if you want another region or set to None to pull all.
+    "TECH_MAP": {
+        "Coal": "POW_Coal_PP",  # Update to your coal tech code if different.
+    },
 }
+
+
+def apply_leap_template_defaults(vars_cfg: dict, data_dir: Path) -> dict:
+    """
+    Fill in LEAP-template-specific defaults using LEAP_TEMPLATE_DEFAULTS, resolving
+    data-relative paths to the repository data directory.
+    """
+    out = dict(vars_cfg)
+
+    def resolve_data_path(default_path: Path) -> Path:
+        if default_path.is_absolute():
+            return default_path
+        parts = list(default_path.parts)
+        if "data" in parts:
+            data_idx = parts.index("data")
+            remainder = Path(*parts[data_idx + 1 :])
+            return data_dir / remainder
+        return data_dir / default_path
+
+    out.setdefault("GENERATE_LEAP_TEMPLATE", False)
+    out.setdefault("LEAP_TEMPLATE_OUTPUT", resolve_data_path(LEAP_TEMPLATE_DEFAULTS["OUTPUT_PATH"]))
+    out.setdefault("LEAP_TEMPLATE_REGION", LEAP_TEMPLATE_DEFAULTS["DEFAULT_REGION"])
+    out.setdefault("LEAP_IMPORT_ID_SOURCE", resolve_data_path(LEAP_TEMPLATE_DEFAULTS["IMPORT_ID_SOURCE"]))
+    return out
+
+
+DEFAULT_SCENARIO = LEAP_TEMPLATE_DEFAULTS["DEFAULT_SCENARIO"]
+CURRENT_ACCOUNTS_SCENARIO = LEAP_TEMPLATE_DEFAULTS["CURRENT_ACCOUNTS_SCENARIO"]
+DEFAULT_REGION = LEAP_TEMPLATE_DEFAULTS["DEFAULT_REGION"]
+OUTPUT_PATH = LEAP_TEMPLATE_DEFAULTS["OUTPUT_PATH"]
+IMPORT_ID_SOURCE = LEAP_TEMPLATE_DEFAULTS["IMPORT_ID_SOURCE"]
+IMPORT_ID_SHEET = LEAP_TEMPLATE_DEFAULTS["IMPORT_ID_SHEET"]
+IMPORT_ID_HEADER_ROW = LEAP_TEMPLATE_DEFAULTS["IMPORT_ID_HEADER_ROW"]
+ID_CHECK_STRICT = LEAP_TEMPLATE_DEFAULTS["ID_CHECK_STRICT"]
+ID_CHECK_BREAK = LEAP_TEMPLATE_DEFAULTS["ID_CHECK_BREAK"]
+NEMO_DB_PATH = LEAP_TEMPLATE_DEFAULTS["NEMO_DB_PATH"]
+AUTO_FILL_FROM_DB = LEAP_TEMPLATE_DEFAULTS["AUTO_FILL_FROM_DB"]
+DEDUPLICATE_ROWS = LEAP_TEMPLATE_DEFAULTS["DEDUPLICATE_ROWS"]
+LEAP_MODEL_NAME = LEAP_TEMPLATE_DEFAULTS["LEAP_MODEL_NAME"]
+LEAP_VERSION = LEAP_TEMPLATE_DEFAULTS["LEAP_VERSION"]
+REGION_FILTER = LEAP_TEMPLATE_DEFAULTS["REGION_FILTER"]
+TECH_MAP = dict(LEAP_TEMPLATE_DEFAULTS["TECH_MAP"])
 
 # Processes to include in the template. Add new entries here and the rows will be generated
 # automatically for both the main scenario and Current Accounts (unless disabled).
@@ -840,6 +884,14 @@ def generate_leap_template(
     df_out_with_headers.to_excel(output_path, index=False, header=False)
     print(f"Wrote {len(df_out)} rows (plus headers) to {output_path}")
     return output_path
+
+
+__all__ = [
+    "LEAP_TEMPLATE_DEFAULTS",
+    "apply_leap_template_defaults",
+    "generate_leap_template",
+    "main",
+]
 
 #%%
 if __name__ == "__main__":

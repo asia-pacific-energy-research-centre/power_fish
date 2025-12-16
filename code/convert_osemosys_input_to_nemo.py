@@ -30,13 +30,13 @@ PARAM_SPECS = {
         "unit_type": "energy",
     },
     # Tech parameters
+    # "CapacityFactor": {#this was replaced with AvailabilityFactor in NEMO in recent versions < but this means we need to use CapacityFactor in place of AvailabilityFactor when converting from OSeMOSYS to NEMO since CapacityFactor contains all the per-timeslice capacity factors in OSeMOSYS
+    #     
+    #     "nemo_table": "AvailabilityFactor",
+    #     "indices": ["REGION", "TECHNOLOGY", "TIMESLICE"],
+    #     "filter_scenario": False,
+    # },
     "CapacityFactor": {
-        # NEMO uses AvailabilityFactor for per-timeslice capacity factors.
-        "nemo_table": "AvailabilityFactor",
-        "indices": ["REGION", "TECHNOLOGY", "TIMESLICE"],
-        "filter_scenario": False,
-    },
-    "AvailabilityFactor": {
         "nemo_table": "AvailabilityFactor",
         "indices": ["REGION", "TECHNOLOGY", "TIMESLICE"],
         "filter_scenario": False,
@@ -330,6 +330,100 @@ def load_sheet(excel_path: Path, sheet_name: str) -> pd.DataFrame:
 
     df.columns = [str(c).strip().upper() for c in df.columns]
     return df
+
+
+def _cleanup_unused_sets(conn: sqlite3.Connection):
+    """
+    Remove FUEL/TECHNOLOGY set entries that are not referenced in any parameter tables.
+    This avoids spurious fuels/techs (e.g., orphan codes that only appeared in set sheets).
+    """
+    cur = conn.cursor()
+    try:
+        tables = [
+            r[0]
+            for r in cur.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+        ]
+    except Exception:
+        return
+
+    used_fuels: set[str] = set()
+    used_techs: set[str] = set()
+    for tbl in tables:
+        try:
+            info = cur.execute(f'PRAGMA table_info("{tbl}")').fetchall()
+        except Exception:
+            continue
+        cols = [c[1] for c in info]
+        if "f" in cols:
+            try:
+                used_fuels.update(
+                    str(r[0]) for r in cur.execute(f'SELECT DISTINCT f FROM "{tbl}" WHERE f IS NOT NULL')
+                )
+            except Exception:
+                pass
+        if "t" in cols:
+            try:
+                used_techs.update(
+                    str(r[0]) for r in cur.execute(f'SELECT DISTINCT t FROM "{tbl}" WHERE t IS NOT NULL')
+                )
+            except Exception:
+                pass
+
+    def _prune(table: str, used: set[str]):
+        if not used:
+            return
+        placeholders = ",".join("?" * len(used))
+        cur.execute(f'DELETE FROM "{table}" WHERE val NOT IN ({placeholders})', tuple(used))
+
+    _prune("FUEL", used_fuels)
+    _prune("TECHNOLOGY", used_techs)
+    conn.commit()
+
+
+def _fill_missing_availability(conn: sqlite3.Connection, default_val: float = 1.0):
+    """
+    Ensure AvailabilityFactor has entries for all timeslices for (region, tech, year) combos
+    that appear in AvailabilityFactor or OutputActivityRatio. Missing entries are filled with
+    the provided default_val.
+    """
+    cur = conn.cursor()
+    try:
+        timeslices = {r[0] for r in cur.execute('SELECT DISTINCT l FROM "YearSplit"').fetchall()}
+    except Exception:
+        timeslices = set()
+    if not timeslices:
+        return
+
+    existing = {
+        (r, t, y, l)
+        for r, t, y, l in cur.execute('SELECT r, t, y, l FROM "AvailabilityFactor"')
+    }
+
+    combos = {(r, t, y) for r, t, y, _ in existing}
+    if not combos:
+        combos = {
+            (r, t, y)
+            for r, t, y in cur.execute(
+                'SELECT r, t, y FROM "OutputActivityRatio" WHERE r IS NOT NULL AND t IS NOT NULL AND y IS NOT NULL'
+            )
+        }
+    if not combos:
+        return
+
+    missing_rows = []
+    for r, t, y in combos:
+        for l in timeslices:
+            if (r, t, y, l) not in existing:
+                missing_rows.append((r, t, l, y, default_val))
+
+    if missing_rows:
+        cur.executemany(
+            'INSERT INTO "AvailabilityFactor" (r, t, l, y, val) VALUES (?, ?, ?, ?, ?)',
+            missing_rows,
+        )
+        conn.commit()
 
 
 def filter_scenario(df: pd.DataFrame, target: str) -> pd.DataFrame:
@@ -716,6 +810,24 @@ def dump_db_to_entry_excel(
 
             out_sheet = unique_sheet_name(sheet_name)
             wide_df.to_excel(writer, sheet_name=out_sheet, index=False)
+
+        # Also export set tables so entry workbooks carry REGION/TECH/etc. values.
+        set_tables = ["REGION", "TECHNOLOGY", "FUEL", "TIMESLICE", "EMISSION", "MODE_OF_OPERATION", "YEAR"]
+        for set_tbl in set_tables:
+            if allowed and set_tbl not in allowed:
+                continue
+            try:
+                df_set = pd.read_sql_query(f'SELECT * FROM "{set_tbl}"', conn)
+            except Exception:
+                df_set = pd.DataFrame()
+            if df_set.empty:
+                df_set = pd.DataFrame({"VALUE": []})
+            else:
+                first_col = df_set.columns[0]
+                df_set = df_set.rename(columns={first_col: "VALUE"})
+                df_set = df_set[["VALUE"]]
+            out_sheet = unique_sheet_name(set_tbl)
+            df_set.to_excel(writer, sheet_name=out_sheet, index=False)
 
     conn.close()
     print(f"Wrote {len(used_sheet_names)} sheets to '{excel_path}'.")
@@ -1127,8 +1239,9 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any]):
     # populate set tables (REGION/TECHNOLOGY/FUEL/TIMESLICE/EMISSION) and YEAR
     _insert_set_values(conn, "REGION", collected_sets.get("REGION", set()))
     _insert_set_values(conn, "TECHNOLOGY", collected_sets.get("TECHNOLOGY", set()))
-    fuels = collected_sets.get("FUEL", set())
-    if "ALL" in fuels or any(spec.get("defaults", {}).get("FUEL") == "ALL" for spec in PARAM_SPECS.values()):
+    fuels = set(collected_sets.get("FUEL", set()))
+    # Only include ALL if it actually appeared in the source data.
+    if "ALL" in fuels:
         fuels.add("ALL")
     _insert_set_values(conn, "FUEL", fuels)
     _insert_set_values(conn, "TIMESLICE", collected_sets.get("TIMESLICE", set()))
@@ -1144,6 +1257,11 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any]):
         print(f"Inserted {len(collected_years)} distinct years into YEAR table.")
     else:
         populate_year_table(conn)
+
+    # Drop set entries that are not referenced in any parameter table
+    _cleanup_unused_sets(conn)
+    # Fill missing AvailabilityFactor rows across timeslices for existing techs
+    _fill_missing_availability(conn)
 
     _backfill_capacity_unit_years(conn)
     if enable_transmission:

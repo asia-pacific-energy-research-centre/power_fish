@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 """
-Core utilities for the NEMO pipeline: template DB helpers, storage test flow,
+Core utilities for the NEMO pipeline: template DB helpers, NEMO test flow,
 log analysis, diagnostics, dummy workbook generation, and shared defaults.
 """
 
@@ -10,12 +10,18 @@ import sqlite3
 import shutil
 import re
 import sys
+import os
+import urllib.request
 from typing import Iterable, Sequence
 
 import pandas as pd
 
-from convert_osemosys_input_to_nemo import dump_db_to_entry_excel, PARAM_SPECS
-from run_nemo_via_julia import create_template_db, run_nemo_on_db
+from convert_osemosys_input_to_nemo import (
+    dump_db_to_entry_excel,
+    PARAM_SPECS,
+    convert_osemosys_input_to_nemo,
+)
+from run_nemo_via_julia import create_template_db, run_nemo_on_db, run_solver_test_script
 
 
 # ---------------------------------------------------------------------------
@@ -63,28 +69,237 @@ def trim_db_years_in_place(db_path: Path, years: list[int]):
 
 
 # ---------------------------------------------------------------------------
-# Storage test flow
+# Storage / NEMO test DB flow
 # ---------------------------------------------------------------------------
-def handle_storage_test(vars_cfg: dict, data_dir: Path, log_dir: Path, run_nemo: bool) -> bool:
+# Raw GitHub URL pointing at the upstream NEMO test folder
+NEMO_TEST_BASE_URL = "https://raw.githubusercontent.com/sei-international/NemoMod.jl/master/test"
+NEMO_TEST_DB_MAP = {
+    "storage_test": "storage_test.sqlite",
+    "storage_transmission_test": "storage_transmission_test.sqlite",
+    "ramp_test": "ramp_test.sqlite",
+}
+# Solver-specific test scripts that exist upstream; used for convenience downloads
+NEMO_SOLVER_TEST_SCRIPTS = {
+    "cbc": "cbc_tests.jl",
+    "glpk": "glpk_tests.jl",
+    "gurobi": "gurobi_tests.jl",
+    "cplex": "cplex_tests.jl",
+    "mosek": "mosek_tests.jl",
+    "xpress": "xpress_tests.jl",
+    "highs": "highs_tests.jl",
+}
+
+
+def detect_solver_preference(vars_cfg: dict) -> str:
+    """Best-effort detection of which solver the user asked NEMO to use (env or config)."""
+    return str(vars_cfg.get("NEMO_SOLVER") or os.environ.get("NEMO_SOLVER") or "cbc").lower()
+
+
+def resolve_solver_from_test_name(test_name: str | None) -> str | None:
     """
-    Handle the storage test shortcut (skip conversion) if enabled.
+    Map a NEMO_TEST_NAME like 'cbc_tests' (or 'cbc') to the corresponding solver key.
+    Returns None when the name is not one of the solver-specific upstream test scripts.
+    """
+    if not test_name:
+        return None
+    normalized = Path(test_name).stem.lower()
+    for solver, file_name in NEMO_SOLVER_TEST_SCRIPTS.items():
+        if normalized in {solver, Path(file_name).stem.lower()}:
+            return solver
+    return None
+
+
+def _download_to_path(url: str, dest_path: Path):
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    with urllib.request.urlopen(url) as resp, dest_path.open("wb") as out:
+        shutil.copyfileobj(resp, out)
+
+
+def ensure_nemo_test_db(test_name: str, dest_dir: Path) -> Path:
+    """
+    Ensure the requested NEMO test DB exists locally; download from upstream if missing.
+    """
+    dest_dir = Path(dest_dir)
+    file_name = NEMO_TEST_DB_MAP.get(test_name, f"{test_name}.sqlite")
+    dest_path = dest_dir / file_name
+    if dest_path.exists():
+        return dest_path
+
+    url = f"{NEMO_TEST_BASE_URL}/{file_name}"
+    print(f"Downloading NEMO test DB '{test_name}' to '{dest_path}'")
+    try:
+        _download_to_path(url, dest_path)
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"Failed to download NEMO test DB '{test_name}' from {url}: {exc}") from exc
+    return dest_path
+
+
+def ensure_solver_test_script(solver: str, dest_dir: Path, *, strict: bool = False) -> Path | None:
+    """
+    Optionally fetch the upstream solver-specific NEMO test script (e.g., cbc_tests.jl) for reference.
+    When strict=True, failures raise instead of printing a warning.
+    """
+    solver_key = solver.lower()
+    file_name = NEMO_SOLVER_TEST_SCRIPTS.get(solver_key)
+    if not file_name:
+        for cand_solver, cand_file in NEMO_SOLVER_TEST_SCRIPTS.items():
+            cand_stem = Path(cand_file).stem.lower()
+            if solver_key in {cand_file.lower(), cand_stem}:
+                solver_key = cand_solver
+                file_name = cand_file
+                break
+    if not file_name:
+        if strict:
+            raise ValueError(f"Unknown solver test '{solver}'.")
+        return None
+    dest_path = Path(dest_dir) / file_name
+    if dest_path.exists():
+        return dest_path
+    url = f"{NEMO_TEST_BASE_URL}/{file_name}"
+    print(f"Downloading NEMO {solver_key} test script to '{dest_path}'")
+    try:
+        _download_to_path(url, dest_path)
+    except Exception as exc:  # noqa: BLE001
+        if strict:
+            raise RuntimeError(f"Failed to download NEMO {solver_key} test script from {url}: {exc}") from exc
+        print(f"Warning: failed to download {file_name} from {url}: {exc}")
+        return None
+    return dest_path
+
+
+def handle_test_run(vars_cfg: dict, data_dir: Path, log_dir: Path, run_nemo: bool) -> bool:
+    """
+    Handle the NEMO test shortcut (skip main conversion) if enabled.
+    Supports:
+      - Built-in upstream NEMO test DB names (auto-download)
+      - Local sqlite DB path
+      - Local Excel path (nemo_entry or osemosys) converted to DB on the fly
     Returns True if the flow was handled and the caller should exit early.
     """
-    if not vars_cfg.get("USE_STORAGE_TEST_DB"):
+    use_test = (
+        vars_cfg.get("USE_TEST_DB")
+        or vars_cfg.get("USE_NEMO_TEST_DB")
+        or vars_cfg.get("TEST_INPUT_PATH")
+        or vars_cfg.get("USE_STORAGE_TEST_DB")  # backward compat
+    )
+    if not use_test:
         return False
 
-    db_path = Path(vars_cfg.get("STORAGE_TEST_DB", data_dir / "storage_test.sqlite"))
-    if not db_path.exists():
-        raise FileNotFoundError(f"Storage test DB not found at '{db_path}'")
+    nemo_test_name = vars_cfg.get("NEMO_TEST_NAME")
+
+    def maybe_handle_solver_specific_test(dest_dir: Path, test_name: str | None = None) -> bool:
+        """Run solver-specific upstream tests (e.g., cbc_tests.jl) when requested."""
+        solver_key = resolve_solver_from_test_name(test_name or nemo_test_name)
+        if not solver_key:
+            return False
+        dest_dir = Path(dest_dir)
+        script_path = ensure_solver_test_script(solver_key, dest_dir, strict=True)
+        # Solver test scripts expect the standard trio of upstream DBs to be present alongside them.
+        for base_test in NEMO_TEST_DB_MAP:
+            ensure_nemo_test_db(base_test, dest_dir)
+        if run_nemo:
+            run_solver_test_script(
+                script_path,
+                db_dir=dest_dir,
+                julia_exe=vars_cfg.get("JULIA_EXE"),
+                log_path=log_dir / f"{solver_key}_tests.log",
+                stream_output=True,
+            )
+        else:
+            print(
+                f"Solver-specific NEMO test script downloaded to '{script_path}', "
+                "but run_nemo=False so execution was skipped."
+            )
+        return True
+
+    test_input = (
+        vars_cfg.get("TEST_INPUT_PATH")
+        or vars_cfg.get("NEMO_TEST_DB_PATH")
+        or vars_cfg.get("TEST_DB_PATH")
+        or vars_cfg.get("STORAGE_TEST_DB")  # backward compat
+    )
+    source_kind = "sqlite"
+    excel_source: Path | None = None
+    db_path: Path | None = None
+    if test_input:
+        test_input_path = Path(test_input)
+        if not test_input_path.exists():
+            dest_dir = (
+                test_input_path.parent
+                if test_input_path.parent != Path("")
+                else Path(vars_cfg.get("NEMO_TEST_DB_DIR", data_dir))
+            )
+            if maybe_handle_solver_specific_test(dest_dir, nemo_test_name):
+                return True
+            if nemo_test_name:
+                db_path = ensure_nemo_test_db(nemo_test_name, dest_dir)
+                test_input_path = db_path
+            else:
+                raise FileNotFoundError(f"Test input not found at '{test_input_path}'")
+        ext = test_input_path.suffix.lower()
+        if ext in {".xlsx", ".xlsm", ".xls"}:
+            source_kind = "excel"
+            excel_source = test_input_path
+        else:
+            db_path = test_input_path
+    else:
+        test_name = (
+            nemo_test_name
+            or ("storage_test" if vars_cfg.get("USE_STORAGE_TEST_DB") else None)
+            or "storage_test"
+        )
+        if maybe_handle_solver_specific_test(Path(vars_cfg.get("NEMO_TEST_DB_DIR", data_dir)), test_name):
+            return True
+        db_dir = Path(vars_cfg.get("NEMO_TEST_DB_DIR", data_dir))
+        db_path = ensure_nemo_test_db(test_name, db_dir)
+
+    if source_kind == "excel" and excel_source:
+        output_db = Path(vars_cfg.get("TEST_OUTPUT_DB") or data_dir / "nemo_test.sqlite")
+        input_mode = str(vars_cfg.get("TEST_INPUT_MODE") or "nemo_entry").lower()
+        # Ensure template exists if conversion is needed
+        ensure_template_db(
+            vars_cfg["TEMPLATE_DB"],
+            auto_create=bool(vars_cfg.get("AUTO_CREATE_TEMPLATE_DB", False)),
+            julia_exe=vars_cfg.get("JULIA_EXE"),
+        )
+        convert_cfg = dict(vars_cfg)
+        convert_cfg.update(
+            {
+                "INPUT_MODE": input_mode,
+                "OSEMOSYS_EXCEL_PATH": excel_source,
+                "NEMO_ENTRY_EXCEL_PATH": excel_source,
+                "OUTPUT_DB": output_db,
+            }
+        )
+        convert_osemosys_input_to_nemo(convert_cfg)
+        db_path = output_db
+    elif source_kind == "sqlite":
+        # db_path was set either from explicit path or download
+        db_path = Path(db_path)
+        if not db_path.exists():
+            raise FileNotFoundError(f"Test DB not found at '{db_path}'")
+    else:
+        raise ValueError(f"Unsupported test source type: {source_kind}")
+
+    solver = detect_solver_preference(vars_cfg)
+    solver_script = ensure_solver_test_script(solver, db_path.parent)
+    if solver_script:
+        print(f"Detected solver '{solver}'. Solver-specific test script available at '{solver_script}'.")
+    else:
+        print(f"Detected solver '{solver}'. No solver-specific test script downloaded.")
 
     if vars_cfg.get("EXPORT_DB_TO_EXCEL"):
         dump_db_to_entry_excel(
             db_path=db_path,
-            excel_path=Path(vars_cfg.get("STORAGE_TEST_EXCEL_PATH", data_dir / "storage_test_dump.xlsx")),
+            excel_path=Path(
+                vars_cfg.get("TEST_EXPORT_DB_TO_EXCEL_PATH")
+                or vars_cfg.get("TEST_EXPORT_EXCEL_PATH")
+                or vars_cfg.get("NEMO_TEST_EXCEL_PATH")
+                or vars_cfg.get("STORAGE_TEST_EXCEL_PATH")  # backward compat
+                or data_dir / "test_db_dump.xlsx"
+            ),
             specs=PARAM_SPECS,
             tables=None,
-            max_rows=None,
-            use_advanced=None,
         )
 
     if run_nemo:
@@ -95,6 +310,11 @@ def handle_storage_test(vars_cfg: dict, data_dir: Path, log_dir: Path, run_nemo:
             stream_output=True,
         )
     return True
+
+
+# Backward compatibility alias
+def handle_storage_test(vars_cfg: dict, data_dir: Path, log_dir: Path, run_nemo: bool) -> bool:
+    return handle_test_run(vars_cfg, data_dir, log_dir, run_nemo)
 
 
 # ---------------------------------------------------------------------------
@@ -402,7 +622,7 @@ def make_dummy_workbook(
     )
 
     # Simple capacity/availability and costs
-    capacity_factor = wide(
+    availability_factor = wide(
         {
             "SCENARIO": [scenario],
             "REGION": [region],
@@ -493,7 +713,7 @@ def make_dummy_workbook(
         "InputActivityRatio": iar,
         "OutputActivityRatio": oar,
         # Converter expects this sheet name to populate AvailabilityFactor table
-        "CapacityFactor": capacity_factor,
+        "AvailabilityFactor": availability_factor,
         "VariableCost": variable_cost,
         "CapitalCost": capital_cost,
         "FixedCost": fixed_cost,
@@ -504,8 +724,8 @@ def make_dummy_workbook(
         "CapacityToActivityUnit": capacity_to_activity,
         "YearSplit": yearsplit,
     }
-    # Include both names to avoid sheet-name mismatches
-    sheets["AvailabilityFactor"] = capacity_factor.copy()
+    # # Include both names to avoid sheet-name mismatches
+    # sheets["AvailabilityFactor"] = availability_factor.copy()
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(out_path) as writer:
@@ -537,30 +757,34 @@ def dummy_main(out_path: str | Path | None = None):
 # Default configuration (less frequently tweaked)
 # ---------------------------------------------------------------------------
 DEFAULTS = {
+    #defaults for main.py
+    "EXPORT_DB_TO_EXCEL": True,
     # Paths (override in main if needed)
     "TEMPLATE_DB": "nemo_template.sqlite",
     "OUTPUT_DB": "nemo.sqlite",
+    "NEMO_TEST_DB_DIR": "nemo_tests",
+    "NEMO_TEST_NAME": "storage_test",
+    "TEST_OUTPUT_DB": "nemo_test.sqlite",
+    "TEST_INPUT_MODE": "nemo_entry",
     # Units
     "TARGET_UNITS": {"energy": "PJ", "power": "GW"},
     "USE_UNIT_CONVERSION": False,
     # Transmission / demand fuel handling
     "ENABLE_NEMO_TRANSMISSION_METHODS": False,
     "REMAP_DEMAND_FUELS_AND_STRIP_TRANSMISSION_TECHS": False,
-    # Storage test
-    "USE_STORAGE_TEST_DB": False,
-    "STORAGE_TEST_DB": "storage_test.sqlite",
-    "STORAGE_TEST_EXCEL_PATH": "nemo_entry_dump.xlsx",
+    # Test shortcut
+    "USE_TEST_DB": False,
+    "USE_NEMO_TEST_DB": False,
+    "TEST_DB_PATH": None,
+    "TEST_INPUT_PATH": None,
+    "TEST_EXPORT_EXCEL_PATH": "nemo_entry_dump.xlsx",
+    "TEST_EXPORT_DB_TO_EXCEL_PATH": "nemo_entry_dump.xlsx",
     # Template creation
     "AUTO_CREATE_TEMPLATE_DB": True,
     # Diagnostics
     "RUN_DIAGNOSTICS": True,
     "AUTO_FILL_MISSING_MODES": True,
     "STRICT_ERRORS": True,
-    # LEAP export
-    "GENERATE_LEAP_TEMPLATE": True,
-    "LEAP_TEMPLATE_OUTPUT": "leap_import_template.xlsx",
-    "LEAP_TEMPLATE_REGION": None,
-    "LEAP_IMPORT_ID_SOURCE": None,
     # NEMO / Julia
     "JULIA_EXE": r"C:\\ProgramData\\Julia\\Julia-1.9.3\\bin\\julia.exe",
 }
@@ -569,31 +793,42 @@ DEFAULTS = {
 def apply_defaults(user_vars: dict, data_dir: Path) -> dict:
     """Fill in less-frequently changed defaults into user_vars, resolving paths via data_dir where needed."""
     out = dict(user_vars)
+    out.setdefault("EXPORT_DB_TO_EXCEL", DEFAULTS["EXPORT_DB_TO_EXCEL"])
     out.setdefault("TEMPLATE_DB", data_dir / DEFAULTS["TEMPLATE_DB"])
     out.setdefault("OUTPUT_DB", data_dir / DEFAULTS["OUTPUT_DB"])
+    out.setdefault("NEMO_TEST_DB_DIR", data_dir / DEFAULTS["NEMO_TEST_DB_DIR"])
+    out.setdefault("NEMO_TEST_DB_PATH", None)
+    out.setdefault("NEMO_TEST_NAME", DEFAULTS["NEMO_TEST_NAME"])
+    out.setdefault("TEST_OUTPUT_DB", data_dir / DEFAULTS["TEST_OUTPUT_DB"])
+    out.setdefault("TEST_INPUT_MODE", DEFAULTS["TEST_INPUT_MODE"])
     out.setdefault("TARGET_UNITS", DEFAULTS["TARGET_UNITS"])
     out.setdefault("USE_UNIT_CONVERSION", DEFAULTS["USE_UNIT_CONVERSION"])
     out.setdefault("ENABLE_NEMO_TRANSMISSION_METHODS", DEFAULTS["ENABLE_NEMO_TRANSMISSION_METHODS"])
     out.setdefault("REMAP_DEMAND_FUELS_AND_STRIP_TRANSMISSION_TECHS", DEFAULTS["REMAP_DEMAND_FUELS_AND_STRIP_TRANSMISSION_TECHS"])
-    out.setdefault("USE_STORAGE_TEST_DB", DEFAULTS["USE_STORAGE_TEST_DB"])
-    out.setdefault("STORAGE_TEST_DB", data_dir / DEFAULTS["STORAGE_TEST_DB"])
-    out.setdefault("STORAGE_TEST_EXCEL_PATH", data_dir / DEFAULTS["STORAGE_TEST_EXCEL_PATH"])
+    out.setdefault("USE_TEST_DB", DEFAULTS["USE_TEST_DB"])
+    out.setdefault("USE_NEMO_TEST_DB", DEFAULTS["USE_NEMO_TEST_DB"])
+    out.setdefault("TEST_INPUT_PATH", DEFAULTS["TEST_INPUT_PATH"])
+    out.setdefault("TEST_DB_PATH", DEFAULTS["TEST_DB_PATH"] if DEFAULTS["TEST_DB_PATH"] is None else data_dir / DEFAULTS["TEST_DB_PATH"])
+    out.setdefault("TEST_EXPORT_EXCEL_PATH", data_dir / DEFAULTS["TEST_EXPORT_EXCEL_PATH"])
+    out.setdefault("TEST_EXPORT_DB_TO_EXCEL_PATH", data_dir / DEFAULTS["TEST_EXPORT_DB_TO_EXCEL_PATH"])
+    out.setdefault("NEMO_TEST_EXCEL_PATH", data_dir / DEFAULTS["TEST_EXPORT_EXCEL_PATH"])  # backward compat name
     out.setdefault("AUTO_CREATE_TEMPLATE_DB", DEFAULTS["AUTO_CREATE_TEMPLATE_DB"])
     out.setdefault("JULIA_EXE", DEFAULTS["JULIA_EXE"])
     out.setdefault("RUN_DIAGNOSTICS", DEFAULTS["RUN_DIAGNOSTICS"])
     out.setdefault("AUTO_FILL_MISSING_MODES", DEFAULTS["AUTO_FILL_MISSING_MODES"])
     out.setdefault("STRICT_ERRORS", DEFAULTS["STRICT_ERRORS"])
-    out.setdefault("GENERATE_LEAP_TEMPLATE", DEFAULTS["GENERATE_LEAP_TEMPLATE"])
-    out.setdefault("LEAP_TEMPLATE_OUTPUT", data_dir / DEFAULTS["LEAP_TEMPLATE_OUTPUT"])
-    out.setdefault("LEAP_TEMPLATE_REGION", DEFAULTS["LEAP_TEMPLATE_REGION"])
-    out.setdefault("LEAP_IMPORT_ID_SOURCE", DEFAULTS["LEAP_IMPORT_ID_SOURCE"])
     return out
 
 
 __all__ = [
     "ensure_template_db",
     "trim_db_years_in_place",
+    "handle_test_run",
     "handle_storage_test",
+    "ensure_nemo_test_db",
+    "ensure_solver_test_script",
+    "detect_solver_preference",
+    "resolve_solver_from_test_name",
     "prepare_run_context",
     "analyze_log",
     "parse_years",

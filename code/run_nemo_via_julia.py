@@ -4,6 +4,8 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
+import textwrap
 from pathlib import Path
 
 # Path to Julia executable.
@@ -195,3 +197,130 @@ def run_nemo_on_db(
             f"See {log_path if log_path else 'stdout/stderr above'} for details."
         )
     print("NEMO run completed.")
+
+
+def run_solver_test_script(
+    script_path: Path,
+    db_dir: Path,
+    julia_exe: str | Path | None = None,
+    log_path: str | Path | None = None,
+    stream_output: bool = True,
+):
+    """
+    Execute an upstream solver-specific NEMO test script (e.g., cbc_tests.jl) after
+    ensuring it can find the bundled test DBs in db_dir.
+    """
+    script_path = Path(script_path)
+    db_dir = Path(db_dir)
+    if not script_path.exists():
+        raise FileNotFoundError(f"NEMO solver test script not found at '{script_path}'.")
+    if not db_dir.exists():
+        raise FileNotFoundError(f"DB directory for solver tests not found at '{db_dir}'.")
+
+    resolved_julia = _resolve_julia_exe(julia_exe)
+    log_path = Path(log_path) if log_path else None
+    if log_path:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Use POSIX-style paths in Julia strings to avoid Windows escape issues.
+    db_dir_str = Path(db_dir).as_posix()
+    script_path_str = Path(script_path).as_posix()
+
+    harness = textwrap.dedent(
+        f"""
+        using NemoMod, SQLite, DataFrames, Test, JuMP
+        const TOL = 0.5
+        compilation = false
+        reg_jumpmode = true
+        calculatescenario_quiet = true
+        dbfile_path = raw"{db_dir_str}"
+        @info "Running solver test script {script_path.name} against DB dir {db_dir_str}"
+        include(raw"{script_path_str}")
+        """
+    )
+    with tempfile.NamedTemporaryFile("w", suffix=".jl", delete=False, encoding="utf-8") as tmp:
+        tmp.write(harness)
+        harness_path = Path(tmp.name)
+
+    cmd = [
+        str(resolved_julia),
+        str(harness_path),
+    ]
+    print("\nRunning NEMO solver test via Julia:")
+    print("  Command:", " ".join(cmd))
+
+    stdout_text = ""
+    stderr_text = ""
+    proc = None
+    try:
+        if stream_output:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                cwd=db_dir,
+            )
+            log_fh = log_path.open("w", encoding="utf-8") if log_path else None
+            collected: list[str] = []
+            try:
+                assert proc.stdout is not None  # for type checkers
+                for line in proc.stdout:
+                    print(line, end="")
+                    collected.append(line)
+                    if log_fh:
+                        log_fh.write(line)
+            finally:
+                if log_fh:
+                    log_fh.flush()
+                    log_fh.close()
+            proc.wait()
+            stdout_text = "".join(collected)
+            print()  # newline after stream
+            if log_path:
+                print(f"  Julia output streamed and written to '{log_path}'")
+            try:
+                text = log_path.read_text() if log_path else stdout_text
+                error_lines = [line for line in text.splitlines() if "error" in line.lower()]
+                if error_lines:
+                    print("  Errors found in output:")
+                    for line in error_lines[:10]:
+                        print("   ", line)
+            except Exception:
+                pass
+        else:
+            proc = subprocess.run(
+                cmd,
+                check=False,
+                text=True,
+                capture_output=bool(log_path),
+                cwd=db_dir,
+            )
+            stdout_text = proc.stdout or ""
+            stderr_text = proc.stderr or ""
+            if log_path:
+                log_path.write_text(stdout_text + "\n--- STDERR ---\n" + stderr_text)
+                print(f"  Julia output written to '{log_path}'")
+                try:
+                    text = log_path.read_text()
+                    error_lines = [line for line in text.splitlines() if "error" in line.lower()]
+                    if error_lines:
+                        print("  Errors found in log:")
+                        for line in error_lines[:10]:
+                            print("   ", line)
+                except Exception:
+                    pass
+    finally:
+        try:
+            harness_path.unlink()
+        except Exception:
+            pass
+
+    if proc is None:
+        raise RuntimeError("Failed to start Julia process for solver test.")
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"NEMO solver test '{script_path.name}' failed with exit code {proc.returncode}. "
+            f"See {log_path if log_path else 'stdout/stderr above'} for details."
+        )
+    print("Solver test run completed.")

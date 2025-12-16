@@ -39,6 +39,8 @@ The environment includes pandas/openpyxl/matplotlib/plotly for data prep and ins
    - Converts the original OSeMOSYS Excel workbook to a NEMO DB (`OUTPUT_DB`).
    - Optionally runs diagnostics (`RUN_DIAGNOSTICS`).
    - Solves the scenario in Julia/NEMO (`run_nemo_via_julia.py`) and writes an optional log (e.g., `data/nemo_run.log`).
+   - To skip conversion and just run a test DB, run with `mode="test"` (e.g., `python code/main.py` with `mode` set in the call or cell). You can point `TEST_INPUT_PATH` to a local `.sqlite` or `.xlsx` (nemo_entry/osemosys; Excel will be converted), or pick an upstream `NEMO_TEST_NAME` (`storage_test`, `storage_transmission_test`, `ramp_test`) to auto-download into `data/nemo_tests/` (auto-download also kicks in when `TEST_INPUT_PATH` is missing but `NEMO_TEST_NAME` is set). Solver-specific test names like `cbc_tests`/`glpk_tests` will download the upstream Julia test script and run it against the bundled NEMO test DBs (logs in `results/logs/<solver>_tests.log`). During a test flow the DB-to-Excel dump uses `TEST_EXPORT_DB_TO_EXCEL_PATH` (falls back to `TEST_EXPORT_EXCEL_PATH`) so you can keep test exports separate from main runs.
+   - To run an existing NEMO database without reconverting Excel, use `mode="db_only"`; set `OUTPUT_DB` to the `.sqlite` you want to run/diagnose.
 
 ## Coding style at a glance
 - Scripts are split into `#%%` cells for quick interactive runs (VS Code with Jupyter interactive).

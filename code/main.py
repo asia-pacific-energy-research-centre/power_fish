@@ -6,21 +6,24 @@ from convert_osemosys_input_to_nemo import (
     dump_db_to_entry_excel,
     PARAM_SPECS,
 )
-from build_leap_import_template import generate_leap_template
+from build_leap_import_template import (
+    generate_leap_template,
+    apply_leap_template_defaults,
+)
 from run_nemo_via_julia import run_nemo_on_db
 from nemo_core import (
     ensure_template_db,
     trim_db_years_in_place,
-    handle_storage_test,
+    handle_test_run,
     prepare_run_context,
     run_diagnostics,
     make_dummy_workbook,
     apply_defaults,
 )
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "data"
+TEST_DIR = PROJECT_ROOT / "data" / "tests"
 LOG_DIR = PROJECT_ROOT / "results" / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -28,30 +31,44 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 # USER CONFIGURATION
 # -------------------------------------------------------------------
 USER_VARS = {
+    ################################
+    # Input paths
     "OSEMOSYS_EXCEL_PATH": DATA_DIR / "POWER 20_USA_data_REF9_S3_test - new file.xlsx",
     "NEMO_ENTRY_EXCEL_PATH": DATA_DIR / "nemo_entry_dump.xlsx",
+    ################################
     # Scenario/name
     "SCENARIO": "Reference",
     # Export populated NEMO DB to Excel
-    "EXPORT_DB_TO_EXCEL": True,
     "EXPORT_DB_TO_EXCEL_PATH": DATA_DIR / "nemo_entry_dump.xlsx",
     # Years to use (None keeps all)
     "YEARS_TO_USE": [y for y in range(2017, 2020)],
     # LEAP template export
     "GENERATE_LEAP_TEMPLATE": False,
     "LEAP_TEMPLATE_OUTPUT": DATA_DIR / "leap_import_template.xlsx",
-    "LEAP_TEMPLATE_REGION": None,  # Override region for LEAP export; None uses defaults in builder.
-    "LEAP_IMPORT_ID_SOURCE": None,  # Optional path to existing LEAP import for ID reuse.
+    "LEAP_IMPORT_ID_SOURCE": DATA_DIR / "import_files/USA_power_leap_import_REF.xlsx", # Path to an existing LEAP export to copy IDs from (set to None to skip). # e.g. Path("../data/import_files/USA_power_leap_import_REF.xlsx")
+    
+    ################################
+    # test run configuration
+    # skip conversion and run a test DB
+    #   - Point to a local .sqlite or .xlsx via TEST_INPUT_PATH (Excel will be converted)
+    #   - Or auto-download an upstream NEMO test DB via NEMO_TEST_NAME (stored in data/nemo_tests/)
+    "USE_TEST_DB": True,
+    "TEST_INPUT_PATH": DATA_DIR / TEST_DIR /"nemo_entry_dump - cbc_tests.xlsx",
+    "NEMO_TEST_NAME": "cbc_tests",  # options: storage_test, storage_transmission_test, ramp_test, or solver test names like cbc_tests/glpk_tests to auto-download and run the upstream solver test script
+    "TEST_EXPORT_DB_TO_EXCEL_PATH": DATA_DIR / TEST_DIR / "test_output_dump.xlsx",
+    ################################
+    
 }
 
 # Merge in less-frequently changed defaults (paths resolved relative to DATA_DIR where applicable)
 VARS = apply_defaults(USER_VARS, DATA_DIR)
+VARS = apply_leap_template_defaults(VARS, DATA_DIR)
 
 def main(mode: str | None = None, run_nemo: bool = True):
     """
     Flow summary:
-      1) Determine mode (osemosys_input / nemo_input / dummy / storage_test)
-      2) Build or reuse the template DB and (unless storage_test) run the conversion pipeline
+      1) Determine mode (osemosys_input / osemosys_input_xlsx / nemo_input / nemo_input_xlsx / dummy / test / db_only)
+      2) Build or reuse the template DB and (unless test or db_only) run the conversion pipeline
       3) Optionally trim years, run diagnostics, and export supporting artifacts (Excel, LEAP template)
       4) Run NEMO once when run_nemo=True
       5) When GENERATE_LEAP_TEMPLATE is true, build the LEAP import template after NEMO finishes
@@ -59,17 +76,35 @@ def main(mode: str | None = None, run_nemo: bool = True):
     cfg = dict(VARS)
     # Default mode if not provided
     mode = (mode or "nemo_entry").lower()
+    mode_aliases = {
+        "osemosys_input_xlsx": "osemosys_input",
+        "nemo_input_xlsx": "nemo_input",
+    }
+    mode = mode_aliases.get(mode, mode)
 
-    # Handle storage test (skip conversion)
-    if handle_storage_test(cfg, DATA_DIR, LOG_DIR, run_nemo):
-        return
+    # Handle test shortcut (skip conversion) only when mode=='test'
+    if mode == "test":
+        cfg["USE_TEST_DB"] = True
+        cfg["USE_NEMO_TEST_DB"] = True
+        if handle_test_run(cfg, DATA_DIR, LOG_DIR, run_nemo):
+            return
+        raise RuntimeError("Test mode selected but no test input configured.")
 
-    # Configure mode specifics and ensure template DB
-    cfg = prepare_run_context(cfg, DATA_DIR, mode, LOG_DIR)
+    db_path: Path
+    if mode == "db_only":
+        db_path = Path(cfg["OUTPUT_DB"])
+        if not db_path.exists():
+            raise FileNotFoundError(
+                f"db_only mode selected but OUTPUT_DB not found at '{db_path}'. "
+                "Point OUTPUT_DB to an existing NEMO database."
+            )
+    else:
+        # Configure mode specifics and ensure template DB
+        cfg = prepare_run_context(cfg, DATA_DIR, mode, LOG_DIR)
 
-    # Convert (handles both osemosys and nemo_entry)
-    convert_osemosys_input_to_nemo(cfg)
-    db_path = Path(cfg["OUTPUT_DB"])
+        # Convert (handles both osemosys and nemo_entry)
+        convert_osemosys_input_to_nemo(cfg)
+        db_path = Path(cfg["OUTPUT_DB"])
 
     # Optional year trim and diagnostics
     if cfg.get("YEARS_TO_USE"):
@@ -99,13 +134,14 @@ def main(mode: str | None = None, run_nemo: bool = True):
         )
 
 #%%
-# modes: list[str] = [
-#     "osemosys_input",
-#     "nemo_input",
+# modes:
+#     "osemosys_input_xlsx",
+#     "nemo_input_xlsx",
+#     "db_only",
 #     "dummy",
-#     # "storage_test",  # Uncomment to test storage test DB flow
-# ]
+#     # "test",  # test a DB flow set by NEMO_TEST_NAME
+# 
 if __name__ == "__main__":
-    main('nemo_input')
+    main('nemo_input_xlsx')
 
 # %%
