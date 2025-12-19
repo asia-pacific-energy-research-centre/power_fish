@@ -1,5 +1,6 @@
 #%%
 import pandas as pd
+import numpy as np
 import sqlite3
 from pathlib import Path
 from shutil import copyfile
@@ -329,7 +330,7 @@ def load_sheet(excel_path: Path, sheet_name: str) -> pd.DataFrame:
         return pd.DataFrame()
 
     df.columns = [str(c).strip().upper() for c in df.columns]
-    return df
+    return _coerce_df_scalars(df)
 
 
 def _cleanup_unused_sets(conn: sqlite3.Connection):
@@ -564,7 +565,7 @@ def insert_rows(conn, nemo_table: str, rows: list[dict], indices: list[str]):
 
     data = []
     for r in rows:
-        tup = [r[i] for i in indices] + [r["YEAR"], r["VALUE"]]
+        tup = [r[i] for i in indices] + [_coerce_scalar(r["YEAR"]), _coerce_scalar(r["VALUE"])]
         data.append(tup)
 
     cur = conn.cursor()
@@ -583,7 +584,7 @@ def insert_rows_no_year(conn, nemo_table: str, rows: list[dict], indices: list[s
     sql = f"INSERT INTO {nemo_table} ({','.join(cols)}) VALUES ({placeholders})"
     data = []
     for r in rows:
-        tup = [r[i] for i in indices] + [r["VALUE"]]
+        tup = [r[i] for i in indices] + [_coerce_scalar(r["VALUE"])]
         data.append(tup)
     cur = conn.cursor()
     cur.executemany(sql, data)
@@ -641,6 +642,9 @@ def _coerce_scalar(val):
     Coerce SQLite/Excel scalars to plain Python numbers where possible.
     Handles bytes blobs that represent little-endian integers (e.g., OperationalLife).
     """
+    if isinstance(val, np.generic):
+        # Avoid numpy scalars being stored as SQLite blobs (e.g., np.int64 -> b'(')
+        return val.item()
     if isinstance(val, (bytes, bytearray)):
         try:
             return int.from_bytes(val, byteorder="little", signed=True)
@@ -992,6 +996,7 @@ def _backfill_capacity_unit_years(conn: sqlite3.Connection):
     cur.execute('DELETE FROM "CapacityOfOneTechnologyUnit" WHERE y IS NULL')
     new_rows = []
     for _, r, t, val in rows:
+        val = _coerce_scalar(val)
         for y in years:
             try:
                 v = float(val)
@@ -1355,6 +1360,52 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any], VERBOSE_ERRORS: bo
         _disable_transmission(conn)
     if config.get("REMAP_DEMAND_FUELS_AND_STRIP_TRANSMISSION_TECHS"):
         _strip_transmission_techs(conn)
+
+    # Quick type sanity check for fields that often arrive as blobs (numpy scalars)
+    def _check_numeric_tables():
+        suspicious: list[str] = []
+        for tbl, col in [
+            ("OperationalLife", "val"),
+            ("OperationalLifeStorage", "val"),
+            ("CapacityOfOneTechnologyUnit", "val"),
+        ]:
+            try:
+                types = {r[0] for r in cur.execute(f'SELECT typeof("{col}") FROM "{tbl}"').fetchall()}
+            except Exception:
+                continue
+            if "blob" in types:
+                suspicious.append(tbl)
+        if suspicious:
+            print(
+                "WARNING: Found blob-typed values in tables that should be numeric "
+                f"(check: {', '.join(suspicious)})."
+            )
+
+    _check_numeric_tables()
+
+    # Flag obviously placeholder capacity values that often cause infeasibility
+    def _check_placeholder_caps():
+        try:
+            big_resid = cur.execute(
+                'SELECT r, t, y, val FROM "ResidualCapacity" WHERE val >= ?', (1e5,)
+            ).fetchall()
+            big_max = cur.execute(
+                'SELECT r, t, y, val FROM "TotalAnnualMaxCapacity" WHERE val >= ?', (1e19,)
+            ).fetchall()
+        except Exception:
+            return
+        if big_resid:
+            print(
+                "WARNING: ResidualCapacity contains very large values (>=1e5). "
+                f"Sample: {big_resid[:3]}"
+            )
+        if big_max:
+            print(
+                "WARNING: TotalAnnualMaxCapacity contains placeholder-scale values (>=1e19). "
+                f"Sample: {big_max[:3]}"
+            )
+
+    _check_placeholder_caps()
 
     # Cross-check modes and YearSplit consistency
     cur = conn.cursor()

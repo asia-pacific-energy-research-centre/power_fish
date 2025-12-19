@@ -67,10 +67,13 @@ function main()
     # Set env NEMO_WRITE_LP to a filepath to always write,
     # or leave unset to only write when status is not OPTIMAL.
     write_lp_path = get(ENV, "NEMO_WRITE_LP", "")
+    # Default to saving in ./intermediate_data when not explicitly set
+    default_lp_path = joinpath(@__DIR__, "..", "intermediate_data", "nemo_model_dump.lp")
     should_write_lp = write_lp_path != "" || status != MOI.OPTIMAL
     if should_write_lp
-        lp_path = write_lp_path != "" ? write_lp_path : "nemo_model_dump.lp"
+        lp_path = write_lp_path != "" ? write_lp_path : default_lp_path
         try
+            mkpath(dirname(lp_path))
             JuMP.write_to_file(jumpmodel, lp_path)
             println("Wrote LP model to ", lp_path, " (status=", status, ")")
         catch err

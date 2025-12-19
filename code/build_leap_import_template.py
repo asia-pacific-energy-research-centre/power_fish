@@ -1,6 +1,8 @@
 
 #%%
 # Build a LEAP import spreadsheet by mapping NEMO DB values to LEAP Branch/Variable rows.
+
+#more documetnation and notes at the bottom of this file
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,7 +18,7 @@ LEAP_TEMPLATE_DEFAULTS = {
     "DEFAULT_SCENARIO": "Target",
     "CURRENT_ACCOUNTS_SCENARIO": "Current Accounts",
     "DEFAULT_REGION": "Region 1",  # If None, mirror REGION_FILTER (or scenario if that is also None).
-    "OUTPUT_PATH": Path("../data/leap_import_template.xlsx"),
+    "OUTPUT_PATH": Path("../results/leap_import_template.xlsx"),
     # Path to an existing LEAP export to copy IDs from (set to None to skip).
     "IMPORT_ID_SOURCE": Path("../data/import_files/USA_power_leap_import_REF.xlsx"),
     "IMPORT_ID_SHEET": "Export",  # Sheet name in the import file.
@@ -76,6 +78,23 @@ LEAP_MODEL_NAME = LEAP_TEMPLATE_DEFAULTS["LEAP_MODEL_NAME"]
 LEAP_VERSION = LEAP_TEMPLATE_DEFAULTS["LEAP_VERSION"]
 REGION_FILTER = LEAP_TEMPLATE_DEFAULTS["REGION_FILTER"]
 TECH_MAP = dict(LEAP_TEMPLATE_DEFAULTS["TECH_MAP"])
+FUEL_MAP = {
+    # Map process/feedstock names to NEMO fuel codes for feedstock share/cost lookups.
+    "Coal": "01_x_thermal_coal",
+    "Natural Gas": "02_x_natural_gas",
+    "Wind": None,
+    "Hydro": None,
+}
+# Map actual tech codes to their output fuels (LEAP branch name + NEMO fuel code).
+# Prefer tech-code keys to avoid confusion with display names; a fallback to process
+# name is used if no tech-code match is found.
+OUTPUT_TECHS = {
+    "POW_Coal_PP": [{"name": "Electricity", "fuel": "17_electricity"}],
+    "POW_Oil_PP": [{"name": "Electricity", "fuel": "17_electricity"}],
+    "POW_NaturalGas_PP": [{"name": "Electricity", "fuel": "17_electricity"}],
+    "POW_Wind": [{"name": "Electricity", "fuel": "17_electricity"}],
+    "POW_Hydro": [{"name": "Electricity", "fuel": "17_electricity"}],
+}
 
 # Processes to include in the template. Add new entries here and the rows will be generated
 # automatically for both the main scenario and Current Accounts (unless disabled).
@@ -217,6 +236,9 @@ TARGET_FEEDSTOCK_VARS = [
     "Fuel Cost",
 ]
 
+OUTPUT_FUEL_VARS = [
+    "Output Share",
+]
 # -------------------------------------------------------------------
 # Mapping definitions
 # Each entry maps (Branch Path, Variable) -> config:
@@ -226,6 +248,7 @@ TARGET_FEEDSTOCK_VARS = [
 #   group_by: list of columns to group on (for aggregates)
 #   transform: string key for special handling
 # -------------------------------------------------------------------
+#Base mappings (applied to all processes, not per-process like the ones in PROCESS_CONFIGS > PROCESS_MAPPING_TEMPLATES). Also One-offs for a single process can be added directly to BASE_MAPPINGS with that process’s branch path (e.g. Transformation\\Electricity Generation\\Processes\\Coal).
 BASE_MAPPINGS: dict[tuple[str, str], dict | None] = {
     # System-level
     ("Transformation\\Electricity Generation", "Planning Reserve Margin"): {
@@ -241,9 +264,13 @@ BASE_MAPPINGS: dict[tuple[str, str], dict | None] = {
     # Placeholders (no NEMO mapping yet -> leave blank)
     ("Transformation\\Electricity Generation", "Peak Load Ratio"): None,
     ("Transformation\\Electricity Generation", "Module Costs"): None,
+    ("Transformation\\Electricity Generation", "Renewable Target"): {
+        "table": "REMinProductionTarget",
+        "select": {"Year": "y", "Value": "val", "Units": "''"},
+        "filters": {"r": REGION_FILTER, "f": "17_electricity"},
+    },
     ("Transformation\\Electricity Generation", "Optimize"): None,
     ("Transformation\\Electricity Generation", "Use Addition Size"): None,
-    ("Transformation\\Electricity Generation", "Renewable Target"): None,
     ("Transformation\\Electricity Generation\\Output Fuels\\Electricity", "Shortfall Rule"): None,
     ("Transformation\\Electricity Generation\\Output Fuels\\Electricity", "Surplus Rule"): None,
     ("Transformation\\Electricity Generation\\Output Fuels\\Electricity", "Usage Rule"): None,
@@ -294,13 +321,43 @@ PROCESS_MAPPING_TEMPLATES = [
     ("Renewable Qualified", {"table": "RETagTechnology", "select": {"Year": "y", "Value": "val"}}),
 ]
 
+FEEDSTOCK_MAPPING_TEMPLATES = [
+    (
+        "Feedstock Fuel Share",
+        {
+            "transform": "feedstock_fuel_share",
+            "filters": {"r": REGION_FILTER, "m": "1"},  # f added per process
+        },
+    ),
+    (
+        "Fuel Cost",
+        {
+            "table": "VariableCost",
+            "select": {"Year": "y", "Value": "val"},
+            "filters": {"r": REGION_FILTER, "m": "1"},  # f added per process
+        },
+    ),
+]
 
-def generate_process_mappings_for_process(process_name: str, tech_code: str | None) -> dict[tuple[str, str], dict]:
+OUTPUT_MAPPING_TEMPLATES = [
+    (
+        "Output Share",
+        {
+            "transform": "output_fuel_share",
+            "filters": {"r": REGION_FILTER, "m": "1"},  # f added per process
+        },
+    ),
+]
+
+
+def generate_process_mappings_for_process(process_name: str, tech_code: str | None, feedstock_name: str | None = None) -> dict[tuple[str, str], dict]:
     """
     Build mapping dict entries for a single process using PROCESS_MAPPING_TEMPLATES and the given tech code.
     """
     out: dict[tuple[str, str], dict] = {}
     base_branch = f"Transformation\\Electricity Generation\\Processes\\{process_name}"
+    feedstock = feedstock_name or process_name
+    fuel_code = FUEL_MAP.get(feedstock)
     for var, template in PROCESS_MAPPING_TEMPLATES:
         mapping = copy.deepcopy(template)
         filters = mapping.get("filters", {})
@@ -311,6 +368,38 @@ def generate_process_mappings_for_process(process_name: str, tech_code: str | No
             filters.update(mapping.pop("filters_extra"))
         mapping["filters"] = filters
         out[(base_branch, var)] = mapping
+    feed_branch = f"{base_branch}\\Feedstock Fuels\\{feedstock}"
+    for var, template in FEEDSTOCK_MAPPING_TEMPLATES:
+        mapping = copy.deepcopy(template)
+        filters = mapping.get("filters", {})
+        filters.update({"r": REGION_FILTER})
+        if tech_code is not None:
+            filters.update({"t": tech_code})
+        if fuel_code is not None:
+            filters.update({"f": fuel_code})
+        if "filters_extra" in mapping:
+            filters.update(mapping.pop("filters_extra"))
+        mapping["filters"] = filters
+        out[(feed_branch, var)] = mapping
+
+    outputs = OUTPUT_TECHS.get(tech_code, []) or OUTPUT_TECHS.get(process_name, [])
+    for out_cfg in outputs:
+        out_name = out_cfg.get("name")
+        out_fuel = out_cfg.get("fuel")
+        if not out_name or not out_fuel:
+            continue
+        out_branch = f"{base_branch}\\Output Fuels\\{out_name}"
+        for var, template in OUTPUT_MAPPING_TEMPLATES:
+            mapping = copy.deepcopy(template)
+            filters = mapping.get("filters", {})
+            filters.update({"r": REGION_FILTER})
+            if tech_code is not None:
+                filters.update({"t": tech_code})
+            filters.update({"f": out_fuel})
+            if "filters_extra" in mapping:
+                filters.update(mapping.pop("filters_extra"))
+            mapping["filters"] = filters
+            out[(out_branch, var)] = mapping
     return out
 
 
@@ -324,7 +413,8 @@ def build_mappings(process_configs: list[dict]) -> dict[tuple[str, str], dict | 
         if not proc_name:
             continue
         tech_code = cfg.get("tech") or TECH_MAP.get(proc_name) or proc_name
-        mappings.update(generate_process_mappings_for_process(proc_name, tech_code))
+        feedstock = cfg.get("feedstock")
+        mappings.update(generate_process_mappings_for_process(proc_name, tech_code, feedstock_name=feedstock))
     return mappings
 
 
@@ -467,6 +557,80 @@ def _transform_full_load_hours(conn: sqlite3.Connection, filters: dict) -> pd.Da
     return df[["Year", "Value", "Units"]]
 
 
+def _transform_feedstock_fuel_share(conn: sqlite3.Connection, filters: dict) -> pd.DataFrame:
+    r = filters.get("r")
+    t = filters.get("t")
+    f = filters.get("f")
+    m = filters.get("m") or "1"
+    if f is None:
+        return pd.DataFrame()
+    try:
+        sql = """
+        WITH fuel_rows AS (
+            SELECT y, f, val
+            FROM InputActivityRatio
+            WHERE (:r IS NULL OR r = :r)
+              AND (:t IS NULL OR t = :t)
+              AND (:m IS NULL OR m = :m)
+        ),
+        totals AS (
+            SELECT y, SUM(val) AS total
+            FROM fuel_rows
+            GROUP BY y
+        )
+        SELECT fr.y AS Year,
+               CASE WHEN tot.total IS NULL OR tot.total = 0 THEN NULL ELSE fr.val / tot.total END AS Value,
+               '' AS Units
+        FROM fuel_rows fr
+        JOIN totals tot ON fr.y = tot.y
+        WHERE fr.f = :f
+        """
+        df = pd.read_sql_query(sql, conn, params={"r": r, "t": t, "f": f, "m": m})
+    except Exception:
+        return pd.DataFrame()
+    for col in ("Year", "Value"):
+        if col in df.columns:
+            df[col] = df[col].apply(_decode_val)
+    return df[["Year", "Value", "Units"]]
+
+
+def _transform_output_fuel_share(conn: sqlite3.Connection, filters: dict) -> pd.DataFrame:
+    r = filters.get("r")
+    t = filters.get("t")
+    f = filters.get("f")
+    m = filters.get("m") or "1"
+    if f is None:
+        return pd.DataFrame()
+    try:
+        sql = """
+        WITH out_rows AS (
+            SELECT y, f, val
+            FROM OutputActivityRatio
+            WHERE (:r IS NULL OR r = :r)
+              AND (:t IS NULL OR t = :t)
+              AND (:m IS NULL OR m = :m)
+        ),
+        totals AS (
+            SELECT y, SUM(val) AS total
+            FROM out_rows
+            GROUP BY y
+        )
+        SELECT orow.y AS Year,
+               CASE WHEN tot.total IS NULL OR tot.total = 0 THEN NULL ELSE orow.val / tot.total END AS Value,
+               '' AS Units
+        FROM out_rows orow
+        JOIN totals tot ON orow.y = tot.y
+        WHERE orow.f = :f
+        """
+        df = pd.read_sql_query(sql, conn, params={"r": r, "t": t, "f": f, "m": m})
+    except Exception:
+        return pd.DataFrame()
+    for col in ("Year", "Value"):
+        if col in df.columns:
+            df[col] = df[col].apply(_decode_val)
+    return df[["Year", "Value", "Units"]]
+
+
 def _transform_full_load_hours_excel(tables: dict[str, pd.DataFrame], filters: dict) -> pd.DataFrame:
     af = tables.get("AvailabilityFactor")
     ys = tables.get("YearSplit")
@@ -491,6 +655,8 @@ def _transform_full_load_hours_excel(tables: dict[str, pd.DataFrame], filters: d
 
 TRANSFORMS = {
     "full_load_hours": _transform_full_load_hours,
+    "feedstock_fuel_share": _transform_feedstock_fuel_share,
+    "output_fuel_share": _transform_output_fuel_share,
 }
 
 
@@ -551,6 +717,7 @@ def generate_process_rows(process_name: str, feedstock_name: str | None = None) 
     """
     base_branch = f"Transformation\\Electricity Generation\\Processes\\{process_name}"
     feedstock = feedstock_name or process_name
+    tech_code = TECH_MAP.get(process_name) or process_name
 
     ca_rows = [(base_branch, v) for v in CURRENT_ACCOUNTS_PROCESS_VARS]
     target_rows = [(base_branch, v) for v in TARGET_PROCESS_VARS]
@@ -559,6 +726,15 @@ def generate_process_rows(process_name: str, feedstock_name: str | None = None) 
         feed_branch = f"{base_branch}\\Feedstock Fuels\\{feedstock}"
         ca_rows.extend((feed_branch, v) for v in CURRENT_ACCOUNTS_FEEDSTOCK_VARS)
         target_rows.extend((feed_branch, v) for v in TARGET_FEEDSTOCK_VARS)
+
+    outputs = OUTPUT_TECHS.get(tech_code, []) or OUTPUT_TECHS.get(process_name, [])
+    for out_cfg in outputs:
+        out_name = out_cfg.get("name")
+        if not out_name:
+            continue
+        out_branch = f"{base_branch}\\Output Fuels\\{out_name}"
+        ca_rows.extend((out_branch, v) for v in OUTPUT_FUEL_VARS)
+        target_rows.extend((out_branch, v) for v in OUTPUT_FUEL_VARS)
 
     return ca_rows, target_rows
 
@@ -851,6 +1027,7 @@ def generate_leap_template(
     if AUTO_FILL_FROM_DB and db_path is not None and Path(db_path).exists():
         conn = sqlite3.connect(db_path)
 
+    breakpoint()
     try:
         for scen_name, rows in scenario_sets:
             if scen_name in seen_scenarios:
@@ -868,7 +1045,7 @@ def generate_leap_template(
     finally:
         if conn is not None:
             conn.close()
-
+    breakpoint()
     df_out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=OUTPUT_COLUMNS)
     import_source = Path(import_id_source) if import_id_source is not None else IMPORT_ID_SOURCE
     import_ids_df = (
@@ -876,11 +1053,14 @@ def generate_leap_template(
         if import_source is not None
         else None
     )
+    breakpoint()
     if import_ids_df is None and import_source is not None:
         raise ValueError(f"Could not load import IDs from the specified file: {import_source}")
     df_out = attach_ids(df_out, import_ids_df)
     df_out = validate_ids(df_out)
     df_out_with_headers = prepend_leap_headers(df_out, model_name=LEAP_MODEL_NAME, version=LEAP_VERSION)
+    
+    breakpoint()
     df_out_with_headers.to_excel(output_path, index=False, header=False)
     print(f"Wrote {len(df_out)} rows (plus headers) to {output_path}")
     return output_path
@@ -892,6 +1072,52 @@ __all__ = [
     "generate_leap_template",
     "main",
 ]
+
+#unmapped vars for reference:
+#   Capacity Credit
+#   Capital Cost
+#   Exogenous Capacity
+#   Fixed OM Cost
+#   Fuel Cost
+#   Full Load Hours
+#   Interest Rate
+#   Lifetime
+#   Maximum Availability
+#   Maximum Capacity
+#   Maximum Capacity Addition
+#   Maximum Production
+#   Minimum Capacity
+#   Minimum Capacity Addition
+#   Minimum Charge
+#   Minimum Production
+#   Minimum Share of Production
+#   Minimum Utilization
+#   Module Costs
+#   Optimize
+#   Optimized New Capacity
+#   Output Price
+#   Peak Load Ratio
+#   Planning Reserve Margin
+#   Process Efficiency
+#   Renewable Qualified
+#   Salvage Value
+#   Stranded Cost
+#   Use Addition Size
+# Reasons these remain unmapped:
+
+# Planning Reserve Margin / Output Share / Output Price / Peak Load Ratio / Module Costs / Optimize / Use Addition Size: No corresponding NEMO table; these are LEAP planner/config options rather than OSeMOSYS inputs in your DB.
+
+# Minimum Charge / Storage carryover / Starting Charge: Your current processes are generation, not storage; the relevant NEMO tables (MinStorageCharge, StorageLevelStart, etc.) apply to storage techs, which aren’t in PROCESS_CONFIGS.
+
+# Optimized New Capacity / Stranded Cost / Salvage Value / Dispatch Rule / Dispatchable / Merit Order / First Simulation Year / Endogenous Capacity / Annual/Seasonal/Hourly Storage Carryover: No source fields in the NEMO DB; these are LEAP options or would require other data not present.
+
+# Process Efficiency: No direct efficiency field; would need a new transform combining OutputActivityRatio and InputActivityRatio to compute output/input.
+
+# Capital Cost / Fixed OM Cost / Variable OM Cost / Exogenous Capacity / Full Load Hours / Interest Rate / Lifetime / Maximum Availability / Maximum/Minimum Capacity (+ additions) / Maximum/Minimum Production / Minimum Share of Production / Minimum Utilization / Planning Reserve Margin: These already have mappings in PROCESS_MAPPING_TEMPLATES or base (either via direct tables or transforms). Remaining “unmapped” appearances are likely from LEAP ID merge, not missing DB mappings.
+
+# Output Price: No price table in DB; leave blank or supply external data.
+
+# In short: anything tied to planner knobs or absent tables stays blank; storage-specific items await storage techs.
 
 #%%
 if __name__ == "__main__":
