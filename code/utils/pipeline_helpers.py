@@ -44,6 +44,8 @@ def print_run_summary(cfg: dict, log_dir: Path):
             print(f"  OSeMOSYS Excel:       {cfg['OSEMOSYS_EXCEL_PATH']}")
         if cfg.get("NEMO_ENTRY_EXCEL_PATH"):
             print(f"  NEMO entry Excel:     {cfg['NEMO_ENTRY_EXCEL_PATH']}")
+    if cfg.get("NEMO_CONFIG_PATH"):
+        print(f"  NEMO config (cwd):    {cfg['NEMO_CONFIG_PATH']}")
 
     # Intermediate / outputs
     if cfg.get("OUTPUT_DB"):

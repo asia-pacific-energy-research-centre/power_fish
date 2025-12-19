@@ -35,13 +35,16 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 USER_VARS = {
     ################################
     # Input paths
-    "OSEMOSYS_EXCEL_PATH": DATA_DIR / "ORIGINAL_OSEMOSYS_INPUT_SHEET_DO_NOT_MOD.xlsx",
-    "NEMO_ENTRY_EXCEL_PATH": DATA_DIR / "nemo_entry_dump_dan.xlsx",
+    "OSEMOSYS_EXCEL_PATH": DATA_DIR / "POWER 20_USA_data_REF9_S3_test - no heat.xlsx",
+    "NEMO_ENTRY_EXCEL_PATH": DATA_DIR / "nemo_entry_dump.xlsx",
+    # Optional NEMO config (nemo.cfg / nemo.ini). When set, Julia runs from the parent dir
+    # so NEMO can pick it up; leave as None to skip.
+    "NEMO_CONFIG_PATH": DATA_DIR / "nemo.cfg",
     ################################
     # Scenario/name
     "SCENARIO": "Reference",
     # Export populated NEMO DB to Excel
-    "EXPORT_DB_TO_EXCEL_PATH": DATA_DIR / "nemo_entry_dump_dan.xlsx",
+    "EXPORT_DB_TO_EXCEL_PATH": DATA_DIR / "nemo_entry_dump.xlsx",
     # Years to use (None keeps all)
     "YEARS_TO_USE": [y for y in range(2017, 2019+1)],
     # LEAP template export
@@ -127,6 +130,7 @@ def main(mode: str | None = None, run_nemo: bool = True):
             julia_exe=cfg.get("JULIA_EXE"),
             log_path=LOG_DIR / "nemo_run.log",
             stream_output=True,
+            config_path=cfg.get("NEMO_CONFIG_PATH"),
         )
     if cfg.get("GENERATE_LEAP_TEMPLATE"):
         generate_leap_template(
