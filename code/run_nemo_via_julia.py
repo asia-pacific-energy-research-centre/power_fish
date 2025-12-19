@@ -17,6 +17,8 @@ DEFAULT_JULIA_EXE = r"C:\NemoMod\Julia\bin\julia.exe"  # <-- change if needed
 # Path to the Julia wrapper script in this folder
 SCRIPT_DIR = Path(__file__).resolve().parent
 RUN_NEMO_SCRIPT = SCRIPT_DIR / "nemo_process.jl"
+# Default LP dump target (mirrors the default in nemo_process.jl)
+DEFAULT_LP_PATH = SCRIPT_DIR.parent / "intermediate_data" / "nemo_model_dump.lp"
 
 
 def _resolve_julia_exe(julia_exe: str | Path | None = None) -> Path:
@@ -111,6 +113,10 @@ def run_nemo_on_db(
 
     resolved_julia = _resolve_julia_exe(julia_exe)
     log_path = Path(log_path) if log_path else None
+    if log_path:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    lp_path = resolve_lp_dump_path()
 
     cmd = [
         str(resolved_julia),
@@ -119,6 +125,12 @@ def run_nemo_on_db(
     ]
     print("\nRunning NEMO via Julia:")
     print("  Command:", " ".join(cmd))
+    print("  Input DB:", db_path)
+    print("  Log file:", log_path if log_path else "<stdout only>")
+    if os.environ.get("NEMO_WRITE_LP"):
+        print(f"  LP dump: {lp_path} (from env NEMO_WRITE_LP)")
+    else:
+        print(f"  LP dump: {lp_path} (default if status != OPTIMAL or NEMO_WRITE_LP is set)")
 
     stdout_text = ""
     stderr_text = ""
@@ -324,3 +336,15 @@ def run_solver_test_script(
             f"See {log_path if log_path else 'stdout/stderr above'} for details."
         )
     print("Solver test run completed.")
+
+
+def resolve_lp_dump_path() -> Path:
+    """
+    Mirror the Julia-side LP resolution:
+    - Use env NEMO_WRITE_LP when set
+    - Otherwise default to ./intermediate_data/nemo_model_dump.lp
+    """
+    env_lp = os.environ.get("NEMO_WRITE_LP")
+    if env_lp:
+        return Path(env_lp)
+    return DEFAULT_LP_PATH

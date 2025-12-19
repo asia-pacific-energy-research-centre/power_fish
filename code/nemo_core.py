@@ -176,15 +176,6 @@ def handle_test_run(vars_cfg: dict, data_dir: Path, log_dir: Path, run_nemo: boo
       - Local Excel path (nemo_entry or osemosys) converted to DB on the fly
     Returns True if the flow was handled and the caller should exit early.
     """
-    use_test = (
-        vars_cfg.get("USE_TEST_DB")
-        or vars_cfg.get("USE_NEMO_TEST_DB")
-        or vars_cfg.get("TEST_INPUT_PATH")
-        or vars_cfg.get("USE_STORAGE_TEST_DB")  # backward compat
-    )
-    if not use_test:
-        return False
-
     nemo_test_name = vars_cfg.get("NEMO_TEST_NAME")
 
     def maybe_handle_solver_specific_test(dest_dir: Path, test_name: str | None = None) -> bool:
@@ -303,6 +294,8 @@ def handle_test_run(vars_cfg: dict, data_dir: Path, log_dir: Path, run_nemo: boo
         )
 
     if run_nemo:
+        if vars_cfg.get("NEMO_WRITE_LP"):
+            os.environ["NEMO_WRITE_LP"] = str(vars_cfg["NEMO_WRITE_LP"])
         run_nemo_on_db(
             db_path,
             julia_exe=vars_cfg.get("JULIA_EXE"),
@@ -772,9 +765,6 @@ DEFAULTS = {
     # Transmission / demand fuel handling
     "ENABLE_NEMO_TRANSMISSION_METHODS": False,
     "REMAP_DEMAND_FUELS_AND_STRIP_TRANSMISSION_TECHS": False,
-    # Test shortcut
-    "USE_TEST_DB": False,
-    "USE_NEMO_TEST_DB": False,
     "TEST_DB_PATH": None,
     "TEST_INPUT_PATH": None,
     "TEST_EXPORT_EXCEL_PATH": "nemo_entry_dump.xlsx",
@@ -787,6 +777,7 @@ DEFAULTS = {
     "STRICT_ERRORS": True,
     # NEMO / Julia
     "JULIA_EXE": r"C:\\ProgramData\\Julia\\Julia-1.9.3\\bin\\julia.exe",
+    "NEMO_WRITE_LP": "intermediate_data/nemo_model_dump.lp"
 }
 
 
@@ -805,8 +796,6 @@ def apply_defaults(user_vars: dict, data_dir: Path) -> dict:
     out.setdefault("USE_UNIT_CONVERSION", DEFAULTS["USE_UNIT_CONVERSION"])
     out.setdefault("ENABLE_NEMO_TRANSMISSION_METHODS", DEFAULTS["ENABLE_NEMO_TRANSMISSION_METHODS"])
     out.setdefault("REMAP_DEMAND_FUELS_AND_STRIP_TRANSMISSION_TECHS", DEFAULTS["REMAP_DEMAND_FUELS_AND_STRIP_TRANSMISSION_TECHS"])
-    out.setdefault("USE_TEST_DB", DEFAULTS["USE_TEST_DB"])
-    out.setdefault("USE_NEMO_TEST_DB", DEFAULTS["USE_NEMO_TEST_DB"])
     out.setdefault("TEST_INPUT_PATH", DEFAULTS["TEST_INPUT_PATH"])
     out.setdefault("TEST_DB_PATH", DEFAULTS["TEST_DB_PATH"] if DEFAULTS["TEST_DB_PATH"] is None else data_dir / DEFAULTS["TEST_DB_PATH"])
     out.setdefault("TEST_EXPORT_EXCEL_PATH", data_dir / DEFAULTS["TEST_EXPORT_EXCEL_PATH"])
@@ -817,6 +806,7 @@ def apply_defaults(user_vars: dict, data_dir: Path) -> dict:
     out.setdefault("RUN_DIAGNOSTICS", DEFAULTS["RUN_DIAGNOSTICS"])
     out.setdefault("AUTO_FILL_MISSING_MODES", DEFAULTS["AUTO_FILL_MISSING_MODES"])
     out.setdefault("STRICT_ERRORS", DEFAULTS["STRICT_ERRORS"])
+    out.setdefault("NEMO_WRITE_LP", DEFAULTS["NEMO_WRITE_LP"])
     return out
 
 

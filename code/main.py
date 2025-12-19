@@ -1,5 +1,6 @@
 #%%
 from pathlib import Path
+import os
 
 from convert_osemosys_input_to_nemo import (
     convert_osemosys_input_to_nemo,
@@ -20,6 +21,7 @@ from nemo_core import (
     make_dummy_workbook,
     apply_defaults,
 )
+from utils.pipeline_helpers import print_run_summary
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "data"
@@ -33,31 +35,44 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 USER_VARS = {
     ################################
     # Input paths
+<<<<<<< HEAD
     "OSEMOSYS_EXCEL_PATH": DATA_DIR / "ORIGINAL_OSEMOSYS_INPUT_SHEET_DO_NOT_MOD.xlsx",
     "NEMO_ENTRY_EXCEL_PATH": DATA_DIR / "nemo_entry_dump_dan.xlsx",
+=======
+    "OSEMOSYS_EXCEL_PATH": DATA_DIR / "POWER 20_USA_data_REF9_S3_test - no heat.xlsx",
+    "NEMO_ENTRY_EXCEL_PATH": DATA_DIR / "nemo_entry_dump.xlsx",
+>>>>>>> a50a5401f3bd05a396d61f2cddd4259251c1d084
     ################################
     # Scenario/name
     "SCENARIO": "Reference",
     # Export populated NEMO DB to Excel
     "EXPORT_DB_TO_EXCEL_PATH": DATA_DIR / "nemo_entry_dump_dan.xlsx",
     # Years to use (None keeps all)
+<<<<<<< HEAD
     "YEARS_TO_USE": [y for y in range(2017, 2019+1)],
+=======
+    "YEARS_TO_USE": [y for y in range(2017, 2020+1)],
+>>>>>>> a50a5401f3bd05a396d61f2cddd4259251c1d084
     # LEAP template export
     "GENERATE_LEAP_TEMPLATE": False,
     "LEAP_TEMPLATE_OUTPUT": DATA_DIR / "leap_import_template.xlsx",
     "LEAP_IMPORT_ID_SOURCE": DATA_DIR / "import_files/USA_power_leap_import_REF.xlsx", # Path to an existing LEAP export to copy IDs from (set to None to skip). # e.g. Path("../data/import_files/USA_power_leap_import_REF.xlsx")
     
     ################################
-    # test run configuration
+    # test run configuration - only runs if mode=='test'
     # skip conversion and run a test DB
     #   - Point to a local .sqlite or .xlsx via TEST_INPUT_PATH (Excel will be converted)
     #   - Or auto-download an upstream NEMO test DB via NEMO_TEST_NAME (stored in data/nemo_tests/)
+<<<<<<< HEAD
     "USE_TEST_DB": False,
     "TEST_INPUT_PATH": DATA_DIR / TEST_DIR /"nemo_entry_dump - cbc_tests.xlsx",
     "NEMO_TEST_NAME": "cbc_tests",  # options: storage_test, storage_transmission_test, ramp_test, or solver test names like cbc_tests/glpk_tests to auto-download and run the upstream solver test script
+=======
+    "TEST_INPUT_PATH": DATA_DIR / TEST_DIR /"nemo_entry_dump - storage_test.xlsx",
+    "NEMO_TEST_NAME": "storage_test",  # options: storage_test, storage_transmission_test, ramp_test, or solver test names like cbc_tests/glpk_tests to auto-download and run the upstream solver test script
+>>>>>>> a50a5401f3bd05a396d61f2cddd4259251c1d084
     "TEST_EXPORT_DB_TO_EXCEL_PATH": DATA_DIR / TEST_DIR / "test_output_dump.xlsx",
-    ################################
-    
+    ################################  
 }
 
 # Merge in less-frequently changed defaults (paths resolved relative to DATA_DIR where applicable)
@@ -84,13 +99,13 @@ def main(mode: str | None = None, run_nemo: bool = True):
 
     # Handle test shortcut (skip conversion) only when mode=='test'
     if mode == "test":
-        cfg["USE_TEST_DB"] = True
-        cfg["USE_NEMO_TEST_DB"] = True
+        cfg["RUN_MODE"] = mode
         if handle_test_run(cfg, DATA_DIR, LOG_DIR, run_nemo):
             return
         raise RuntimeError("Test mode selected but no test input configured.")
 
     db_path: Path
+    cfg["RUN_MODE"] = mode
     if mode == "db_only":
         db_path = Path(cfg["OUTPUT_DB"])
         if not db_path.exists():
@@ -98,9 +113,11 @@ def main(mode: str | None = None, run_nemo: bool = True):
                 f"db_only mode selected but OUTPUT_DB not found at '{db_path}'. "
                 "Point OUTPUT_DB to an existing NEMO database."
             )
+        print_run_summary(cfg, LOG_DIR)
     else:
         # Configure mode specifics and ensure template DB
         cfg = prepare_run_context(cfg, DATA_DIR, mode, LOG_DIR)
+        print_run_summary(cfg, LOG_DIR)
 
         # Convert (handles both osemosys and nemo_entry)
         convert_osemosys_input_to_nemo(cfg, VERBOSE_ERRORS=True)
@@ -118,6 +135,8 @@ def main(mode: str | None = None, run_nemo: bool = True):
 
     # Run NEMO once
     if run_nemo:
+        if cfg.get("NEMO_WRITE_LP"):
+            os.environ["NEMO_WRITE_LP"] = str(cfg["NEMO_WRITE_LP"])
         run_nemo_on_db(
             db_path,
             julia_exe=cfg.get("JULIA_EXE"),
