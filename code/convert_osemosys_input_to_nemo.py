@@ -1011,6 +1011,33 @@ def _backfill_capacity_unit_years(conn: sqlite3.Connection):
     print(f"Backfilled CapacityOfOneTechnologyUnit for years; added {len(new_rows)} rows.")
 
 
+def _dedupe_capacity_unit(conn: sqlite3.Connection):
+    """
+    Ensure CapacityOfOneTechnologyUnit has unique (r, t, y) rows.
+    Keeps the first occurrence per key and drops any duplicates to avoid UNIQUE
+    constraint errors when NEMO reads the table.
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            CREATE TEMP TABLE _cap_unit_dedup AS
+            SELECT r, t, y, val
+            FROM CapacityOfOneTechnologyUnit
+            GROUP BY r, t, y
+            """
+        )
+        cur.execute('DELETE FROM "CapacityOfOneTechnologyUnit"')
+        cur.execute(
+            'INSERT INTO "CapacityOfOneTechnologyUnit" (r, t, y, val) '
+            'SELECT r, t, y, val FROM _cap_unit_dedup'
+        )
+        cur.execute('DROP TABLE _cap_unit_dedup')
+        conn.commit()
+    except Exception:
+        conn.rollback()
+
+
 def _ensure_minimal_transmission(conn: sqlite3.Connection):
     """
     If transmission tables are empty, populate a minimal single-node setup:
@@ -1354,6 +1381,7 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any], VERBOSE_ERRORS: bo
     _fill_missing_availability(conn)
 
     _backfill_capacity_unit_years(conn)
+    _dedupe_capacity_unit(conn)
     if enable_transmission:
         _ensure_minimal_transmission(conn)
     else:

@@ -301,6 +301,7 @@ def handle_test_run(vars_cfg: dict, data_dir: Path, log_dir: Path, run_nemo: boo
             julia_exe=vars_cfg.get("JULIA_EXE"),
             log_path=log_dir / "nemo_run.log",
             stream_output=True,
+            config_path=vars_cfg.get("NEMO_CONFIG_PATH"),
         )
     return True
 
@@ -755,6 +756,7 @@ DEFAULTS = {
     # Paths (override in main if needed)
     "TEMPLATE_DB": "nemo_template.sqlite",
     "OUTPUT_DB": "nemo.sqlite",
+    "NEMO_CONFIG_PATH": "nemo.cfg",
     "NEMO_TEST_DB_DIR": "nemo_tests",
     "NEMO_TEST_NAME": "storage_test",
     "TEST_OUTPUT_DB": "nemo_test.sqlite",
@@ -787,6 +789,7 @@ def apply_defaults(user_vars: dict, data_dir: Path) -> dict:
     out.setdefault("EXPORT_DB_TO_EXCEL", DEFAULTS["EXPORT_DB_TO_EXCEL"])
     out.setdefault("TEMPLATE_DB", data_dir / DEFAULTS["TEMPLATE_DB"])
     out.setdefault("OUTPUT_DB", data_dir / DEFAULTS["OUTPUT_DB"])
+    out.setdefault("NEMO_CONFIG_PATH", data_dir / DEFAULTS["NEMO_CONFIG_PATH"])
     out.setdefault("NEMO_TEST_DB_DIR", data_dir / DEFAULTS["NEMO_TEST_DB_DIR"])
     out.setdefault("NEMO_TEST_DB_PATH", None)
     out.setdefault("NEMO_TEST_NAME", DEFAULTS["NEMO_TEST_NAME"])
