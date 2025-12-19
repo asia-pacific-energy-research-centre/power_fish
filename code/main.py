@@ -35,24 +35,15 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 USER_VARS = {
     ################################
     # Input paths
-<<<<<<< HEAD
     "OSEMOSYS_EXCEL_PATH": DATA_DIR / "ORIGINAL_OSEMOSYS_INPUT_SHEET_DO_NOT_MOD.xlsx",
     "NEMO_ENTRY_EXCEL_PATH": DATA_DIR / "nemo_entry_dump_dan.xlsx",
-=======
-    "OSEMOSYS_EXCEL_PATH": DATA_DIR / "POWER 20_USA_data_REF9_S3_test - no heat.xlsx",
-    "NEMO_ENTRY_EXCEL_PATH": DATA_DIR / "nemo_entry_dump.xlsx",
->>>>>>> a50a5401f3bd05a396d61f2cddd4259251c1d084
     ################################
     # Scenario/name
     "SCENARIO": "Reference",
     # Export populated NEMO DB to Excel
     "EXPORT_DB_TO_EXCEL_PATH": DATA_DIR / "nemo_entry_dump_dan.xlsx",
     # Years to use (None keeps all)
-<<<<<<< HEAD
     "YEARS_TO_USE": [y for y in range(2017, 2019+1)],
-=======
-    "YEARS_TO_USE": [y for y in range(2017, 2020+1)],
->>>>>>> a50a5401f3bd05a396d61f2cddd4259251c1d084
     # LEAP template export
     "GENERATE_LEAP_TEMPLATE": False,
     "LEAP_TEMPLATE_OUTPUT": DATA_DIR / "leap_import_template.xlsx",
