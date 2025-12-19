@@ -33,15 +33,15 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 USER_VARS = {
     ################################
     # Input paths
-    "OSEMOSYS_EXCEL_PATH": DATA_DIR / "POWER 20_USA_data_REF9_S3_test - new file.xlsx",
-    "NEMO_ENTRY_EXCEL_PATH": DATA_DIR / "nemo_entry_dump.xlsx",
+    "OSEMOSYS_EXCEL_PATH": DATA_DIR / "ORIGINAL_OSEMOSYS_INPUT_SHEET_DO_NOT_MOD.xlsx",
+    "NEMO_ENTRY_EXCEL_PATH": DATA_DIR / "nemo_entry_dump_dan.xlsx",
     ################################
     # Scenario/name
     "SCENARIO": "Reference",
     # Export populated NEMO DB to Excel
-    "EXPORT_DB_TO_EXCEL_PATH": DATA_DIR / "nemo_entry_dump.xlsx",
+    "EXPORT_DB_TO_EXCEL_PATH": DATA_DIR / "nemo_entry_dump_dan.xlsx",
     # Years to use (None keeps all)
-    "YEARS_TO_USE": [y for y in range(2017, 2020)],
+    "YEARS_TO_USE": [y for y in range(2017, 2019+1)],
     # LEAP template export
     "GENERATE_LEAP_TEMPLATE": False,
     "LEAP_TEMPLATE_OUTPUT": DATA_DIR / "leap_import_template.xlsx",
@@ -52,7 +52,7 @@ USER_VARS = {
     # skip conversion and run a test DB
     #   - Point to a local .sqlite or .xlsx via TEST_INPUT_PATH (Excel will be converted)
     #   - Or auto-download an upstream NEMO test DB via NEMO_TEST_NAME (stored in data/nemo_tests/)
-    "USE_TEST_DB": True,
+    "USE_TEST_DB": False,
     "TEST_INPUT_PATH": DATA_DIR / TEST_DIR /"nemo_entry_dump - cbc_tests.xlsx",
     "NEMO_TEST_NAME": "cbc_tests",  # options: storage_test, storage_transmission_test, ramp_test, or solver test names like cbc_tests/glpk_tests to auto-download and run the upstream solver test script
     "TEST_EXPORT_DB_TO_EXCEL_PATH": DATA_DIR / TEST_DIR / "test_output_dump.xlsx",
@@ -142,6 +142,10 @@ def main(mode: str | None = None, run_nemo: bool = True):
 #     # "test",  # test a DB flow set by NEMO_TEST_NAME
 # 
 if __name__ == "__main__":
-    main('osemosys_input_xlsx')
+    main('nemo_input_xlsx')
 
 # %%
+
+
+## Daniel's notes - what changes were made
+## Gave 2019 values of 99999 for CHP oil and other - to deal with infeasibilities
