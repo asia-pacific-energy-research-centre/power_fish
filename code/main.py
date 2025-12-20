@@ -5,6 +5,8 @@ import os
 from convert_osemosys_input_to_nemo import (
     convert_osemosys_input_to_nemo,
     dump_db_to_entry_excel,
+    export_results_to_excel,
+    export_results_to_excel_wide,
     PARAM_SPECS,
 )
 from build_leap_import_template import (
@@ -22,6 +24,7 @@ from nemo_core import (
     apply_defaults,
 )
 from utils.pipeline_helpers import print_run_summary
+from plot_results import plot_result_tables
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "data"
@@ -35,8 +38,8 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 USER_VARS = {
     ################################
     # Input paths
-    "OSEMOSYS_EXCEL_PATH": DATA_DIR / "POWER 20_USA_data_REF9_S3_test - no heat.xlsx",
-    "NEMO_ENTRY_EXCEL_PATH": DATA_DIR / "nemo_entry_dump.xlsx",
+    "OSEMOSYS_EXCEL_PATH": DATA_DIR / "POWER 20_USA_data_REF9_S3_test.xlsx",# - no heat.xlsx",
+    "NEMO_ENTRY_EXCEL_PATH": DATA_DIR / "nemo_entry_dump_reflection.xlsx",# - storage test 2.xlsx",#nemo_entry_dump.xlsx",
     # Optional NEMO config (nemo.cfg / nemo.ini). When set, Julia runs from the parent dir
     # so NEMO can pick it up; leave as None to skip.
     "NEMO_CONFIG_PATH": DATA_DIR / "nemo.cfg",
@@ -44,9 +47,14 @@ USER_VARS = {
     # Scenario/name
     "SCENARIO": "Reference",
     # Export populated NEMO DB to Excel
-    "EXPORT_DB_TO_EXCEL_PATH": DATA_DIR / "nemo_entry_dump.xlsx",
+    "EXPORT_DB_TO_EXCEL_PATH": DATA_DIR / "nemo_entry_dump_reflection2.xlsx",
+    "EXPORT_RESULTS_TO_EXCEL_PATH": PROJECT_ROOT / "results" / "results.xlsx",
+    "EXPORT_RESULTS_WIDE_TO_EXCEL_PATH": PROJECT_ROOT / "results" / "results_wide.xlsx",
+    # Plot results (matplotlib) after run
+    "PLOT_RESULTS_DIR": PROJECT_ROOT / "results" / "plots",
+    "PLOT_RESULTS_TABLES": ["vproductionbytechnologyannual", "vnewcapacity"],  # list like ["vproductionbytechnologyannual", "vnewcapacity"] to limit
     # Years to use (None keeps all)
-    "YEARS_TO_USE": [y for y in range(2017, 2019+1)],
+    "YEARS_TO_USE": [y for y in range(2020, 2021+1)],
     # LEAP template export
     "GENERATE_LEAP_TEMPLATE": False,
     "LEAP_TEMPLATE_OUTPUT": DATA_DIR / "leap_import_template.xlsx",
@@ -57,7 +65,7 @@ USER_VARS = {
     # skip conversion and run a test DB
     #   - Point to a local .sqlite or .xlsx via TEST_INPUT_PATH (Excel will be converted)
     #   - Or auto-download an upstream NEMO test DB via NEMO_TEST_NAME (stored in data/nemo_tests/)
-    "TEST_INPUT_PATH": DATA_DIR / TEST_DIR /"nemo_entry_dump - storage_test.xlsx",
+    "TEST_INPUT_PATH": DATA_DIR / TEST_DIR /"nemo_entry_dump - storage test.xlsx",
     "NEMO_TEST_NAME": "storage_test",  # options: storage_test, storage_transmission_test, ramp_test, or solver test names like cbc_tests/glpk_tests to auto-download and run the upstream solver test script
     "TEST_EXPORT_DB_TO_EXCEL_PATH": DATA_DIR / TEST_DIR / "test_output_dump.xlsx",
     ################################  
@@ -132,6 +140,32 @@ def main(mode: str | None = None, run_nemo: bool = True):
             stream_output=True,
             config_path=cfg.get("NEMO_CONFIG_PATH"),
         )
+    if cfg.get("EXPORT_RESULTS_TO_EXCEL"):
+        export_results_to_excel(
+            db_path=db_path,
+            excel_path=Path(
+                cfg.get("EXPORT_RESULTS_TO_EXCEL_PATH")
+                or PROJECT_ROOT / "results" / "results.xlsx"
+            ),
+        )
+    if cfg.get("EXPORT_RESULTS_WIDE_TO_EXCEL"):
+        export_results_to_excel_wide(
+            db_path=db_path,
+            excel_path=Path(
+                cfg.get("EXPORT_RESULTS_WIDE_TO_EXCEL_PATH")
+                or PROJECT_ROOT / "results" / "results_wide.xlsx"
+            ),
+        )
+    if cfg.get("PLOT_RESULTS"):
+        plot_result_tables(
+            db_path=db_path,
+            output_dir=Path(
+                cfg.get("PLOT_RESULTS_DIR") or PROJECT_ROOT / "results" / "plots"
+            ),
+            tables=cfg.get("PLOT_RESULTS_TABLES"),
+            max_series=int(cfg.get("PLOT_RESULTS_MAX_SERIES") or 12),
+            show=True,
+        )
     if cfg.get("GENERATE_LEAP_TEMPLATE"):
         generate_leap_template(
             scenario=cfg.get("SCENARIO"),
@@ -149,11 +183,15 @@ def main(mode: str | None = None, run_nemo: bool = True):
 #     "dummy",
 #     # "test",  # test a DB flow set by NEMO_TEST_NAME
 # 
+# print('to do let daniel know that the nemo_entry_dump - storage test.xlsx file may be misspelled as nemo_entry_dump - storage_test.xlsx within the data/tests folder. If you wanted to  run it thorugh the regular process, you also need to chang the years')
+# print('todo add an error for when the yers we want arent in the input data. since thats A COMOMN ACCIDENT. also we actually dont even have a way of processing the results...')
+# i tink if we create a default params sheet itll be good.
+#will also need to change the leap template creator so it doesnt accidntlaly pull results tables from hte sqlite db - but not Variablecosts!
+#should move all config vars to a single file soon.
 if __name__ == "__main__":
     main('nemo_input_xlsx')
 
 # %%
-
 
 ## Daniel's notes - what changes were made
 ## Gave 2019 values of 99999 for CHP oil and other - to deal with infeasibilities

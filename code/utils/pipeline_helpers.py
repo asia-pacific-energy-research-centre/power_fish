@@ -52,6 +52,12 @@ def print_run_summary(cfg: dict, log_dir: Path):
         print(f"  Output DB (sqlite):   {cfg['OUTPUT_DB']}")
     if cfg.get("EXPORT_DB_TO_EXCEL_PATH"):
         print(f"  DB export Excel:      {cfg['EXPORT_DB_TO_EXCEL_PATH']}")
+    if cfg.get("EXPORT_RESULTS_TO_EXCEL_PATH") and cfg.get("EXPORT_RESULTS_TO_EXCEL"):
+        print(f"  Results export:       {cfg['EXPORT_RESULTS_TO_EXCEL_PATH']}")
+    if cfg.get("EXPORT_RESULTS_WIDE_TO_EXCEL_PATH") and cfg.get("EXPORT_RESULTS_WIDE_TO_EXCEL"):
+        print(f"  Results export (wide):{cfg['EXPORT_RESULTS_WIDE_TO_EXCEL_PATH']}")
+    if cfg.get("PLOT_RESULTS") and cfg.get("PLOT_RESULTS_DIR"):
+        print(f"  Results plots dir:    {cfg['PLOT_RESULTS_DIR']}")
     if cfg.get("GENERATE_LEAP_TEMPLATE") and cfg.get("LEAP_TEMPLATE_OUTPUT"):
         print(f"  LEAP template output: {cfg['LEAP_TEMPLATE_OUTPUT']}")
 
