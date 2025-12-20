@@ -753,6 +753,14 @@ def dummy_main(out_path: str | Path | None = None):
 DEFAULTS = {
     #defaults for main.py
     "EXPORT_DB_TO_EXCEL": True,
+    "EXPORT_RESULTS_TO_EXCEL": True,
+    "EXPORT_RESULTS_TO_EXCEL_PATH": None,
+    "EXPORT_RESULTS_WIDE_TO_EXCEL": True,
+    "EXPORT_RESULTS_WIDE_TO_EXCEL_PATH": None,
+    "PLOT_RESULTS": True,
+    "PLOT_RESULTS_DIR": None,
+    "PLOT_RESULTS_TABLES": None,
+    "PLOT_RESULTS_MAX_SERIES": 12,
     # Paths (override in main if needed)
     "TEMPLATE_DB": "nemo_template.sqlite",
     "OUTPUT_DB": "nemo.sqlite",
@@ -803,6 +811,14 @@ def apply_defaults(user_vars: dict, data_dir: Path) -> dict:
     out.setdefault("TEST_DB_PATH", DEFAULTS["TEST_DB_PATH"] if DEFAULTS["TEST_DB_PATH"] is None else data_dir / DEFAULTS["TEST_DB_PATH"])
     out.setdefault("TEST_EXPORT_EXCEL_PATH", data_dir / DEFAULTS["TEST_EXPORT_EXCEL_PATH"])
     out.setdefault("TEST_EXPORT_DB_TO_EXCEL_PATH", data_dir / DEFAULTS["TEST_EXPORT_DB_TO_EXCEL_PATH"])
+    out.setdefault("EXPORT_RESULTS_TO_EXCEL", DEFAULTS["EXPORT_RESULTS_TO_EXCEL"])
+    out.setdefault("EXPORT_RESULTS_TO_EXCEL_PATH", DEFAULTS["EXPORT_RESULTS_TO_EXCEL_PATH"])
+    out.setdefault("EXPORT_RESULTS_WIDE_TO_EXCEL", DEFAULTS["EXPORT_RESULTS_WIDE_TO_EXCEL"])
+    out.setdefault("EXPORT_RESULTS_WIDE_TO_EXCEL_PATH", DEFAULTS["EXPORT_RESULTS_WIDE_TO_EXCEL_PATH"])
+    out.setdefault("PLOT_RESULTS", DEFAULTS["PLOT_RESULTS"])
+    out.setdefault("PLOT_RESULTS_DIR", DEFAULTS["PLOT_RESULTS_DIR"])
+    out.setdefault("PLOT_RESULTS_TABLES", DEFAULTS["PLOT_RESULTS_TABLES"])
+    out.setdefault("PLOT_RESULTS_MAX_SERIES", DEFAULTS["PLOT_RESULTS_MAX_SERIES"])
     out.setdefault("NEMO_TEST_EXCEL_PATH", data_dir / DEFAULTS["TEST_EXPORT_EXCEL_PATH"])  # backward compat name
     out.setdefault("AUTO_CREATE_TEMPLATE_DB", DEFAULTS["AUTO_CREATE_TEMPLATE_DB"])
     out.setdefault("JULIA_EXE", DEFAULTS["JULIA_EXE"])

@@ -326,6 +326,7 @@ def load_sheet(excel_path: Path, sheet_name: str) -> pd.DataFrame:
     try:
         df = pd.read_excel(excel_path, sheet_name=sheet_name)
     except ValueError:
+        # breakpoint()
         print(f"  Sheet '{sheet_name}' not found. Skipping.")
         return pd.DataFrame()
 
@@ -910,6 +911,164 @@ def dump_db_to_entry_excel(
 
     conn.close()
     print(f"Wrote {len(used_sheet_names)} sheets to '{excel_path}'.")
+
+
+def export_results_to_excel(
+    db_path: Path,
+    excel_path: Path,
+    tables: list[str] | None = None,
+):
+    """
+    Export only result tables (names starting with 'v') to an Excel workbook.
+    Keeps columns in the narrow format (indices + val/solvedtm), with verbose
+    column names where possible.
+    """
+    db_path = Path(db_path)
+    excel_path = Path(excel_path)
+    excel_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    cur = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' "
+        "AND name LIKE 'v%' AND name NOT LIKE 'sqlite_%' "
+        "ORDER BY name"
+    )
+    skip_tables = {"Version", "VariableCost"}
+    all_tables = [row[0] for row in cur.fetchall() if row[0] not in skip_tables]
+    allowed = set(tables) if tables else None
+
+    used_sheet_names: set[str] = set()
+
+    def unique_sheet_name(base: str) -> str:
+        candidate = base[:31]
+        counter = 1
+        while candidate in used_sheet_names:
+            suffix = f"_{counter}"
+            candidate = (base[: 31 - len(suffix)] + suffix)[:31]
+            counter += 1
+        used_sheet_names.add(candidate)
+        return candidate
+
+    written = 0
+    with pd.ExcelWriter(excel_path) as writer:
+        for tbl in all_tables:
+            if allowed and tbl not in allowed:
+                continue
+            try:
+                df = pd.read_sql_query(f'SELECT * FROM "{tbl}"', conn)
+            except Exception as exc:
+                print(f"  Skipping '{tbl}' during results export: {exc}")
+                continue
+
+            if df.empty:
+                df = pd.DataFrame(columns=["VALUE"])
+
+            rename_map = {col: INDEX_NAME_MAP_REV.get(col, col) for col in df.columns}
+            if "val" in df.columns:
+                rename_map["val"] = "VALUE"
+            if "y" in df.columns:
+                rename_map["y"] = "YEAR"
+            # Drop solve timestamp; not useful for most analyses.
+            df = df.drop(columns=[c for c in df.columns if c.lower() == "solvedtm"], errors="ignore")
+            df = df.rename(columns=rename_map)
+            sheet_name = unique_sheet_name(tbl)
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
+            written += 1
+
+    conn.close()
+    print(f"Wrote {written} result table(s) to '{excel_path}'.")
+
+
+def export_results_to_excel_wide(
+    db_path: Path,
+    excel_path: Path,
+    tables: list[str] | None = None,
+):
+    """
+    Export result tables (v*) to an Excel workbook pivoted wide on YEAR.
+    Each sheet contains index columns + one column per YEAR.
+    """
+    db_path = Path(db_path)
+    excel_path = Path(excel_path)
+    excel_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    cur = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' "
+        "AND name LIKE 'v%' AND name NOT LIKE 'sqlite_%' "
+        "ORDER BY name"
+    )
+    skip_tables = {"Version", "VariableCost"}
+    all_tables = [row[0] for row in cur.fetchall() if row[0] not in skip_tables]
+    allowed = set(tables) if tables else None
+
+    used_sheet_names: set[str] = set()
+
+    def unique_sheet_name(base: str) -> str:
+        candidate = base[:31]
+        counter = 1
+        while candidate in used_sheet_names:
+            suffix = f"_{counter}"
+            candidate = (base[: 31 - len(suffix)] + suffix)[:31]
+            counter += 1
+        used_sheet_names.add(candidate)
+        return candidate
+
+    written = 0
+    with pd.ExcelWriter(excel_path) as writer:
+        for tbl in all_tables:
+            if allowed and tbl not in allowed:
+                continue
+            try:
+                df = pd.read_sql_query(f'SELECT * FROM "{tbl}"', conn)
+            except Exception as exc:
+                print(f"  Skipping '{tbl}' during wide results export: {exc}")
+                continue
+
+            if df.empty:
+                print(f"  Skipping '{tbl}' during wide results export: empty table")
+                continue
+
+            df = df.drop(columns=[c for c in df.columns if c.lower() == "solvedtm"], errors="ignore")
+            rename_map = {col: INDEX_NAME_MAP_REV.get(col, col) for col in df.columns}
+            if "val" in df.columns:
+                rename_map["val"] = "VALUE"
+            if "y" in df.columns:
+                rename_map["y"] = "YEAR"
+            df = df.rename(columns=rename_map)
+
+            if "YEAR" not in df.columns or "VALUE" not in df.columns:
+                print(f"  Skipping '{tbl}' during wide results export: missing YEAR/VALUE")
+                continue
+
+            df["YEAR"] = pd.to_numeric(df["YEAR"], errors="coerce")
+            df = df.dropna(subset=["YEAR"])
+
+            idx_cols = [c for c in df.columns if c not in {"YEAR", "VALUE"}]
+            if not idx_cols:
+                df["_group"] = "total"
+                idx_cols = ["_group"]
+
+            try:
+                wide = (
+                    df.pivot_table(index=idx_cols, columns="YEAR", values="VALUE", aggfunc="first")
+                    .reset_index()
+                )
+            except Exception as exc:
+                print(f"  Skipping '{tbl}' during wide results export: pivot failed ({exc})")
+                continue
+
+            # Ensure year columns sorted and string-labeled for Excel friendliness.
+            non_year_cols = [c for c in wide.columns if not isinstance(c, (int, float))]
+            year_cols = sorted([c for c in wide.columns if isinstance(c, (int, float))])
+            ordered_cols = non_year_cols + year_cols
+            wide = wide[ordered_cols]
+            wide.columns = [str(c) if isinstance(c, (int, float)) else c for c in wide.columns]
+
+            sheet_name = unique_sheet_name(f"{tbl}_wide")
+            wide.to_excel(writer, sheet_name=sheet_name, index=False)
+            written += 1
+
+    conn.close()
+    print(f"Wrote {written} wide result table(s) to '{excel_path}'.")
 
 def populate_year_table(conn: sqlite3.Connection):
     cur = conn.cursor()
