@@ -24,7 +24,7 @@ from nemo_core import (
     make_dummy_workbook,
 )
 from config_defaults import apply_defaults
-from utils.pipeline_helpers import print_run_summary
+from utils.pipeline_helpers import print_run_summary, _as_bool, run_postprocess_steps
 from plotting.plotly_dashboard import generate_plotly_dashboard
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -33,54 +33,6 @@ TEST_DIR = PROJECT_ROOT / "data" / "tests"
 LOG_DIR = PROJECT_ROOT / "results" / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-
-def _as_bool(val) -> bool:
-    if isinstance(val, bool):
-        return val
-    if val is None:
-        return False
-    if isinstance(val, str):
-        return val.strip().lower() in {"1", "true", "yes", "y", "on"}
-    return bool(val)
-
-def run_postprocess_steps(cfg: dict, db_path: Path):
-    """Run exports/plots/dashboard (shared by normal and postprocess-only flows)."""
-    if cfg.get("EXPORT_RESULTS_TO_EXCEL"):
-        export_results_to_excel(
-            db_path=db_path,
-            excel_path=Path(
-                cfg.get("EXPORT_RESULTS_TO_EXCEL_PATH")
-                or PROJECT_ROOT / "results" / "results.xlsx"
-            ),
-        )
-    if cfg.get("EXPORT_RESULTS_WIDE_TO_EXCEL"):
-        export_results_to_excel_wide(
-            db_path=db_path,
-            excel_path=Path(
-                cfg.get("EXPORT_RESULTS_WIDE_TO_EXCEL_PATH")
-                or PROJECT_ROOT / "results" / "results_wide.xlsx"
-            ),
-        )
-    if cfg.get("PLOTLY_DASHBOARD"):
-        generate_plotly_dashboard(
-            db_path=db_path,
-            output_path=Path(
-                PROJECT_ROOT / "results" / "plots" / "dashboard.html"
-            ),
-            plots_config_dict=None,
-            layout="scroll",
-            function_figs=None,
-            config_yaml=cfg.get("PLOTLY_CONFIG_YAML"),
-            no_columns=None,
-        )
-    if cfg.get("GENERATE_LEAP_TEMPLATE"):
-        generate_leap_template(
-            scenario=cfg.get("SCENARIO"),
-            region=cfg.get("LEAP_TEMPLATE_REGION"),
-            nemo_db_path=db_path,
-            output_path=cfg.get("LEAP_TEMPLATE_OUTPUT"),
-            import_id_source=cfg.get("LEAP_IMPORT_ID_SOURCE"),
-        )
 
 # -------------------------------------------------------------------
 # USER CONFIGURATION
@@ -151,7 +103,7 @@ def main(mode: str | None = None, run_nemo: bool = True):
         print_run_summary(cfg, LOG_DIR, postprocess_only=True)
         # Ensure we never run Julia when postprocessing
         run_nemo = False
-        run_postprocess_steps(cfg, db_path)
+        run_postprocess_steps(cfg, db_path, PROJECT_ROOT)
         return
     # Default mode if not provided
     mode = (mode or "nemo_entry").lower()
@@ -216,7 +168,7 @@ def main(mode: str | None = None, run_nemo: bool = True):
         db_path = final_db_path
 
     # Postprocess outputs
-    run_postprocess_steps(cfg, db_path)
+    run_postprocess_steps(cfg, db_path, PROJECT_ROOT)
 
 #%%
 # modes:
