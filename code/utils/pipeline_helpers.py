@@ -5,6 +5,9 @@ from pathlib import Path
 
 from nemo_core import handle_test_run as _core_handle_test_run, resolve_solver_from_test_name
 from run_nemo_via_julia import resolve_lp_dump_path, DEFAULT_LP_PATH
+from convert_osemosys_input_to_nemo import export_results_to_excel, export_results_to_excel_wide
+from plotting.plotly_dashboard import generate_plotly_dashboard
+from build_leap_import_template import generate_leap_template
 
 
 def handle_test_run(vars_cfg: dict, data_dir: Path, run_nemo: bool) -> bool:
@@ -82,3 +85,54 @@ def print_run_summary(cfg: dict, log_dir: Path, postprocess_only: bool = False):
                 print(f"  LP dump path:         {lp_path} (default if write triggered)")
     print(f"  Log file:             {log_path}")
     print("--------------------\n")
+
+
+def _as_bool(val) -> bool:
+    """Lightweight truthy coercion for user/CLI/env inputs."""
+    if isinstance(val, bool):
+        return val
+    if val is None:
+        return False
+    if isinstance(val, str):
+        return val.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(val)
+
+
+def run_postprocess_steps(cfg: dict, db_path: Path, project_root: Path):
+    """Run exports/plots/dashboard (shared by normal and postprocess-only flows)."""
+    if cfg.get("EXPORT_RESULTS_TO_EXCEL"):
+        export_results_to_excel(
+            db_path=db_path,
+            excel_path=Path(
+                cfg.get("EXPORT_RESULTS_TO_EXCEL_PATH")
+                or project_root / "results" / "results.xlsx"
+            ),
+        )
+    if cfg.get("EXPORT_RESULTS_WIDE_TO_EXCEL"):
+        export_results_to_excel_wide(
+            db_path=db_path,
+            excel_path=Path(
+                cfg.get("EXPORT_RESULTS_WIDE_TO_EXCEL_PATH")
+                or project_root / "results" / "results_wide.xlsx"
+            ),
+        )
+    if cfg.get("PLOTLY_DASHBOARD"):
+        generate_plotly_dashboard(
+            db_path=db_path,
+            output_path=Path(
+                project_root / "results" / "plots" / "dashboard.html"
+            ),
+            plots_config_dict=None,
+            layout="scroll",
+            function_figs=None,
+            config_yaml=cfg.get("PLOTLY_CONFIG_YAML"),
+            no_columns=None,
+        )
+    if cfg.get("GENERATE_LEAP_TEMPLATE"):
+        generate_leap_template(
+            scenario=cfg.get("SCENARIO"),
+            region=cfg.get("LEAP_TEMPLATE_REGION"),
+            nemo_db_path=db_path,
+            output_path=cfg.get("LEAP_TEMPLATE_OUTPUT"),
+            import_id_source=cfg.get("LEAP_IMPORT_ID_SOURCE"),
+        )
