@@ -11,31 +11,7 @@ import sqlite3
 import sys
 import pandas as pd
 
-# -------------------------------------------------------------------
-# User-configurable defaults
-# -------------------------------------------------------------------
-LEAP_TEMPLATE_DEFAULTS = {
-    "DEFAULT_SCENARIO": "Target",
-    "CURRENT_ACCOUNTS_SCENARIO": "Current Accounts",
-    "DEFAULT_REGION": "Region 1",  # If None, mirror REGION_FILTER (or scenario if that is also None).
-    "OUTPUT_PATH": Path("../results/leap_import_template.xlsx"),
-    # Path to an existing LEAP export to copy IDs from (set to None to skip).
-    "IMPORT_ID_SOURCE": Path("../data/import_files/USA_power_leap_import_REF.xlsx"),
-    "IMPORT_ID_SHEET": "Export",  # Sheet name in the import file.
-    "IMPORT_ID_HEADER_ROW": 2,  # Header row index (0-based) in the import file.
-    "ID_CHECK_STRICT": True,  # If True, raise when IDs are missing after merge.
-    "ID_CHECK_BREAK": True,  # If True, breakpoint() when IDs are missing after merge.
-    "NEMO_DB_PATH": Path("../data/nemo.sqlite"),  # Set to None to skip autofill.
-    "AUTO_FILL_FROM_DB": True,
-    "DEDUPLICATE_ROWS": True,  # Drop duplicate Branch/Variable pairs before filling.
-    "LEAP_MODEL_NAME": "USA transport",  # Populates the header row; change to your LEAP Area/Model name.
-    "LEAP_VERSION": "2",  # Populates the Version field in the header row.
-    # Region/tech mapping used when querying the NEMO DB.
-    "REGION_FILTER": "20_USA",  # Change if you want another region or set to None to pull all.
-    "TECH_MAP": {
-        "Coal": "POW_Coal_PP",  # Update to your coal tech code if different.
-    },
-}
+from config_defaults import LEAP_TEMPLATE_DEFAULTS
 
 
 def apply_leap_template_defaults(vars_cfg: dict, data_dir: Path) -> dict:

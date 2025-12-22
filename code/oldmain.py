@@ -8,6 +8,7 @@ from convert_osemosys_input_to_nemo import (
 )
 from build_leap_import_template import generate_leap_template
 from run_nemo_via_julia import run_nemo_on_db
+from config_defaults import apply_defaults
 from nemo_core import (
     ensure_template_db,
     trim_db_years_in_place,
@@ -15,7 +16,6 @@ from nemo_core import (
     prepare_run_context,
     run_diagnostics,
     make_dummy_workbook,
-    apply_defaults,
 )
 
 

@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 sys.path.append('code')
-from nemo_core import apply_defaults
+from config_defaults import apply_defaults
 from build_leap_import_template import apply_leap_template_defaults
 from convert_osemosys_input_to_nemo import convert_osemosys_input_to_nemo
 

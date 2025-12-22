@@ -1,0 +1,37 @@
+layout: scroll #scroll
+no_columns: 2 #rows will be auto-calculated
+available_functions:
+- capacity
+- emissions
+- generation
+- input_use
+- new_capacity
+- total_cost
+function_figs:
+  generation:
+    drop_zero_categories: true
+  capacity:
+    drop_zero_categories: true
+  input_use:
+    drop_zero_categories: true
+  emissions:
+    drop_zero_categories: true
+  new_capacity:
+    drop_zero_categories: true
+dict_figs:
+- table: vproductionbytechnologyannual
+  plot: area
+  x: YEAR
+  y: VALUE
+  color: TECHNOLOGY
+  title: Production by tech
+  function_options:
+    drop_zero_categories: true
+- table: vnewcapacity
+  plot: bar
+  x: YEAR
+  y: VALUE
+  color: TECHNOLOGY
+  title: New capacity
+  function_options:
+    drop_zero_categories: true
