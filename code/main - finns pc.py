@@ -61,7 +61,7 @@ USER_VARS = {
     "EXPORT_RESULTS_TO_EXCEL_PATH": PROJECT_ROOT / "results" / "results.xlsx",
     "EXPORT_RESULTS_WIDE_TO_EXCEL_PATH": PROJECT_ROOT / "results" / "results_wide.xlsx",
     # Years to use (None keeps all)
-    "YEARS_TO_USE": [y for y in range(2023, 2059+1)],
+    "YEARS_TO_USE": [y for y in range(2020, 2050+1)],
     # LEAP template export
     "GENERATE_LEAP_TEMPLATE": False,
     "LEAP_TEMPLATE_OUTPUT": DATA_DIR / "leap_import_template.xlsx",
@@ -72,7 +72,7 @@ USER_VARS = {
     # skip conversion and run a test DB
     #   - Point to a local .sqlite or .xlsx via TEST_INPUT_PATH (Excel will be converted)
     #   - Or auto-download an upstream NEMO test DB via NEMO_TEST_NAME (stored in data/nemo_tests/)
-    "TEST_INPUT_PATH": DATA_DIR / TEST_DIR /"storage_test_dump.xlsx",
+    "TEST_INPUT_PATH": DATA_DIR / TEST_DIR /"nemo_entry_dump - storage test.xlsx",
     "NEMO_TEST_NAME": "storage_test",  # options: storage_test, storage_transmission_test, ramp_test, or solver test names like cbc_tests/glpk_tests to auto-download and run the upstream solver test script
     "TEST_EXPORT_DB_TO_EXCEL_PATH": DATA_DIR / TEST_DIR / "test_output_dump.xlsx",
     ################################  

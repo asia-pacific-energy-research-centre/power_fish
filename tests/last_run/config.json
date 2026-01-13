@@ -1,8 +1,11 @@
 {
-  "saved_at": "2026-01-13T07:32:58Z",
+  "saved_at": "2026-01-13T07:11:40Z",
   "config": {
     "SCENARIO": "Reference",
     "YEARS_TO_USE": [
+      2020,
+      2021,
+      2022,
       2023,
       2024,
       2025,
@@ -30,6 +33,7 @@
       2047,
       2048,
       2049,
+<<<<<<< HEAD
       2050,
       2051,
       2052,
@@ -40,6 +44,9 @@
       2057,
       2058,
       2059
+=======
+      2050
+>>>>>>> 74e2a489b538a5e63d5d1666f709d842932222a9
     ],
     "VARS_TO_SAVE": [
       "vdemandnn",
@@ -66,6 +73,7 @@
   },
   "files": {
     "OSEMOSYS_EXCEL_PATH": {
+<<<<<<< HEAD
       "source": "C:\\Users\\finbar.maunsell\\github\\power_fish\\data\\ORIGINAL_OSEMOSYS_INPUT_SHEET_DO_NOT_MOD.xlsx",
       "snapshot": "C:\\Users\\finbar.maunsell\\github\\power_fish\\tests\\last_run\\osemosys_excel_path_ORIGINAL_OSEMOSYS_INPUT_SHEET_DO_NOT_MOD.xlsx"
     },
@@ -84,6 +92,26 @@
     "OUTPUT_DB": {
       "source": "C:\\Users\\finbar.maunsell\\github\\power_fish\\data\\nemo.sqlite",
       "snapshot": "C:\\Users\\finbar.maunsell\\github\\power_fish\\tests\\last_run\\output_db.sqlite"
+=======
+      "source": "C:\\Users\\Work\\github\\power_fish\\data\\POWER 20_USA_data_REF9_S3_test.xlsx",
+      "snapshot": "C:\\Users\\Work\\github\\power_fish\\tests\\last_run\\osemosys_excel_path_POWER 20_USA_data_REF9_S3_test.xlsx"
+    },
+    "NEMO_ENTRY_EXCEL_PATH": {
+      "source": "C:\\Users\\Work\\github\\power_fish\\data\\nemo_entry_dump_reflection.xlsx",
+      "snapshot": "C:\\Users\\Work\\github\\power_fish\\tests\\last_run\\nemo_entry_excel_path_nemo_entry_dump_reflection.xlsx"
+    },
+    "NEMO_CONFIG_PATH": {
+      "source": "C:\\Users\\Work\\github\\power_fish\\data\\nemo.cfg",
+      "snapshot": "C:\\Users\\Work\\github\\power_fish\\tests\\last_run\\nemo_config_path_nemo.cfg"
+    },
+    "LEAP_IMPORT_ID_SOURCE": {
+      "source": "C:\\Users\\Work\\github\\power_fish\\data\\import_files\\USA_power_leap_import_REF.xlsx",
+      "snapshot": "C:\\Users\\Work\\github\\power_fish\\tests\\last_run\\leap_import_id_source_USA_power_leap_import_REF.xlsx"
+    },
+    "OUTPUT_DB": {
+      "source": "C:\\Users\\Work\\github\\power_fish\\data\\nemo.sqlite",
+      "snapshot": "C:\\Users\\Work\\github\\power_fish\\tests\\last_run\\output_db.sqlite"
+>>>>>>> 74e2a489b538a5e63d5d1666f709d842932222a9
     }
   }
 }
