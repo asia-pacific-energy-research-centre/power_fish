@@ -102,6 +102,7 @@ def run_nemo_on_db(
     log_path: str | Path | None = None,
     stream_output: bool = True,
     config_path: str | Path | None = None,
+    varstosave: list[str] | None = None,
 ):
     """
     Call Julia + NEMO to solve the scenario in db_path.
@@ -142,6 +143,11 @@ def run_nemo_on_db(
     else:
         print(f"  LP dump: {lp_path} (default if status != OPTIMAL or NEMO_WRITE_LP is set)")
 
+    env = os.environ.copy()
+    if varstosave is not None:
+        cleaned = [str(v).strip() for v in varstosave if str(v).strip()]
+        env["NEMO_VARSTOSAVE"] = ",".join(cleaned)
+
     stdout_text = ""
     stderr_text = ""
     if stream_output:
@@ -152,6 +158,7 @@ def run_nemo_on_db(
             stderr=subprocess.STDOUT,
             text=True,
             cwd=workdir,
+            env=env,
         )
         log_fh = log_path.open("w", encoding="utf-8") if log_path else None
         collected: list[str] = []
@@ -191,6 +198,7 @@ def run_nemo_on_db(
             text=True,
             capture_output=bool(log_path),
             cwd=workdir,
+            env=env,
         )
         stdout_text = proc.stdout or ""
         stderr_text = proc.stderr or ""

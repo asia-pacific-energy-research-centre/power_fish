@@ -304,6 +304,7 @@ def handle_test_run(vars_cfg: dict, data_dir: Path, log_dir: Path, run_nemo: boo
             log_path=log_dir / "nemo_run.log",
             stream_output=True,
             config_path=vars_cfg.get("NEMO_CONFIG_PATH"),
+            varstosave=vars_cfg.get("VARS_TO_SAVE"),
         )
     return True
 
