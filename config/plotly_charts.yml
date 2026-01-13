@@ -1,15 +1,33 @@
 layout: scroll #scroll
 no_columns: 2 #rows will be auto-calculated
-available_functions:
-- capacity
-- emissions
-- generation
-- input_use
-- new_capacity
-- total_cost
+# output_name supports tokens: {ECONOMY}, {SCENARIO}, {INPUTNAME}, {RUN_MODE}, {DATEID}
+# Example: dashboard_{ECONOMY}_{SCENARIO}_{DATEID}.html
+output_name: dashboard_{ECONOMY}_{SCENARIO}_{DATEID}.html # optional; relative to results/plots
+# Global plotting options
+# - top_n_categories: keep only the top N categories (by total VALUE) for any plot
+#   unless overridden in a specific plot's function_options / options.
+# - top_n_include_other: if true, everything outside top N is grouped into "Other".
+# - map_unmapped_to_other: if true, categories not found in the mapping table
+#   are grouped under "Other (unmapped)". Set false to keep raw IDs instead.
+top_n_categories: 20
+top_n_include_other: true
+map_unmapped_to_other: false
+##############################################################
+# Define pre-defined functions available for automatic plotting below
+available_functions: # charts with pre-defined functions available for automatic plotting. Choose from these and state in the 'function_figs' section below
+- capacity # Area chart of total capacity by technology over time (vtotalcapacityannual)
+- emissions # Area chart of emissions by technology over time (AnnualTechnologyEmission) > TODO not yet implemented
+- generation # Area chart of generation by technology over time (vproductionbytechnologyannual)
+- input_use # Line chart of input use by technology over time (vusebytechnologyannual)
+- new_capacity # Bar chart of new capacity by technology over time (vnewcapacity)
+- total_cost # Line chart of total discounted cost over time (vtotaldiscountedcost)
+##############################################################
+# Define figures to be plotted below
 function_figs:
   generation:
     drop_zero_categories: true
+    # top_n_categories: 8
+    # top_n_include_other: false
   capacity:
     drop_zero_categories: true
   input_use:
@@ -18,6 +36,9 @@ function_figs:
     drop_zero_categories: true
   new_capacity:
     drop_zero_categories: true
+  total_cost: {}
+###############################################################
+# Define custom figures to be plotted below. use the table names from the database and define x and y axes using the column names from the tables. Basically follows the plotly.express parameters format, e.g. plotly.express.area(data_frame=table, x=x, y=y, color=color, title=title, ...)
 dict_figs:
 - table: vproductionbytechnologyannual
   plot: area
@@ -25,13 +46,19 @@ dict_figs:
   y: VALUE
   color: TECHNOLOGY
   title: Production by tech
+  y_units: PJ
+  transform: sum_by_group
+  groupby: [TECHNOLOGY, YEAR]
   function_options:
     drop_zero_categories: true
+    # top_n_categories: 10
+    # top_n_include_other: false
 - table: vnewcapacity
   plot: bar
   x: YEAR
   y: VALUE
   color: TECHNOLOGY
   title: New capacity
+  y_units: GW
   function_options:
     drop_zero_categories: true

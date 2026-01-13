@@ -16,6 +16,12 @@ DEFAULTS = {
     "PLOTLY_DASHBOARD": True,
     # Plotly dashboard driven by YAML only; path, layout, dict/function figs read from file
     "PLOTLY_CONFIG_YAML": Path("../config/plotly_charts.yml"),
+    "PLOTLY_DASHBOARD_PATH": None,
+    "PLOTLY_PNG_DIR": None,
+    # Optional: auto-generate EmissionActivityRatio from fuel factors
+    "EMISSIONS_FACTOR_CSV": Path("../config/9th_edition_emission_factors.csv"),
+    "EMISSIONS_LABEL": "CO2",
+    "EMISSIONS_FACTOR_OVERRIDE": True,
 
     # --- Paths (override in main if needed) ---
     "TEMPLATE_DB": "nemo_template.sqlite",
@@ -52,7 +58,74 @@ DEFAULTS = {
 
     # --- Post-processing only mode ---
     "RUN_POSTPROCESS_ONLY": False,  # when True, skip conversion/NEMO and only run exports/plots on OUTPUT_DB
+    "SAVE_TEST_SNAPSHOT": True,  # save latest run inputs/settings to tests/last_run
+
+    # --- NEMO results selection ---
+    # List of NemoMod result variables to save (comma-separated in Julia).
+    # Set to []/None to use NemoMod defaults.
+    # See VARS_TO_SAVE_AVAILABLE for common options.
+    "VARS_TO_SAVE": [
+        "vdemandnn", "vnewcapacity", "vtotalcapacityannual", "vproductionbytechnologyannual",
+        "vproductionnn", "vusebytechnologyannual", "vusenn", "vtotaldiscountedcost",
+        "vtotaltechnologyannualactivity", "vannualtechnologyemissionbymode",
+        "vannualtechnologyemission", "vannualemissions", "vmodelperiodemissions",
+    ],
 }
+
+# Common NemoMod result variables; use to populate VARS_TO_SAVE.
+VARS_TO_SAVE_AVAILABLE = [
+    # Core activity/capacity outputs
+    "vdemandnn",  # demand by fuel and year
+    "vnewcapacity",  # new capacity by technology and year
+    "vtotalcapacityannual",  # total capacity by technology and year
+    "vproductionbytechnologyannual",  # production by technology and year
+    "vproductionnn",  # production by fuel and year
+    "vusebytechnologyannual",  # use by technology and year
+    "vusenn",  # use by fuel and year
+    "vtotaldiscountedcost",  # total discounted cost by year
+    "vtotaltechnologyannualactivity",  # total annual activity by technology and year
+    # Emissions outputs (see NemoMod.jl docs)
+    "vannualtechnologyemissionbymode",  # emissions by technology and mode (annual)
+    "vannualtechnologyemission",  # emissions by technology (annual)
+    "vannualemissions",  # total emissions by year
+    "vmodelperiodemissions",  # total emissions over model period
+]
+# DefaultParams defaults for NEMO DB when sheet is missing/empty.
+DEFAULT_PARAMS = [
+    (1, "AccumulatedAnnualDemand", 0),
+    (3, "AnnualExogenousEmission", 0),
+    (5, "AvailabilityFactor", 1),
+    (6, "CapacityOfOneTechnologyUnit", 0),
+    (7, "CapacityToActivityUnit", 31.536),
+    (8, "CapitalCost", 0),
+    (9, "CapitalCostStorage", 0),
+    (10, "DepreciationMethod", 1),
+    (11, "DiscountRate", 0.05),
+    (12, "EmissionActivityRatio", 0),
+    (13, "EmissionsPenalty", 0),
+    (14, "FixedCost", 0),
+    (15, "InputActivityRatio", 0),
+    (16, "MinStorageCharge", 0),
+    (18, "ModelPeriodExogenousEmission", 0),
+    (19, "OperationalLife", 1),
+    (20, "OperationalLifeStorage", 99),
+    (21, "OutputActivityRatio", 0),
+    (24, "RETagTechnology", 0),
+    (28, "ResidualCapacity", 0),
+    (29, "ResidualStorageCapacity", 999),
+    (30, "SpecifiedAnnualDemand", 0),
+    (31, "SpecifiedDemandProfile", 0),
+    (32, "StorageLevelStart", 999),
+    (33, "StorageMaxChargeRate", 99),
+    (34, "StorageMaxDischargeRate", 99),
+    (35, "TechnologyFromStorage", 0),
+    (36, "TechnologyToStorage", 0),
+    (39, "TotalAnnualMinCapacity", 0),
+    (40, "TotalAnnualMinCapacityInvestment", 0),
+    (42, "TotalTechnologyModelPeriodActivityLowerLimit", 0),
+    (44, "TradeRoute", 0),
+    (45, "VariableCost", 0),
+]
 
 # LEAP template defaults (formerly in build_leap_import_template.py)
 # Configure how the LEAP import workbook is generated.
@@ -107,6 +180,14 @@ def apply_defaults(user_vars: dict, data_dir: Path) -> dict:
     out.setdefault("EXPORT_RESULTS_WIDE_TO_EXCEL", DEFAULTS["EXPORT_RESULTS_WIDE_TO_EXCEL"])
     out.setdefault("EXPORT_RESULTS_WIDE_TO_EXCEL_PATH", DEFAULTS["EXPORT_RESULTS_WIDE_TO_EXCEL_PATH"])
     out.setdefault("PLOTLY_DASHBOARD", DEFAULTS["PLOTLY_DASHBOARD"])
+    if "PLOTLY_PNG_DIR" not in out:
+        png_dir = DEFAULTS["PLOTLY_PNG_DIR"]
+        out["PLOTLY_PNG_DIR"] = Path(png_dir) if png_dir is not None else None
+    if "PLOTLY_DASHBOARD_PATH" not in out:
+        out["PLOTLY_DASHBOARD_PATH"] = data_dir.parent / "plotting_output" / "dashboard.html"
+    out.setdefault("EMISSIONS_FACTOR_CSV", DEFAULTS["EMISSIONS_FACTOR_CSV"])
+    out.setdefault("EMISSIONS_LABEL", DEFAULTS["EMISSIONS_LABEL"])
+    out.setdefault("EMISSIONS_FACTOR_OVERRIDE", DEFAULTS["EMISSIONS_FACTOR_OVERRIDE"])
     # Plotly YAML lives under the project (not under data_dir). Keep user-provided Path/str if set.
     if "PLOTLY_CONFIG_YAML" not in out:
         cfg_path = DEFAULTS["PLOTLY_CONFIG_YAML"]
@@ -119,6 +200,20 @@ def apply_defaults(user_vars: dict, data_dir: Path) -> dict:
     out.setdefault("STRICT_ERRORS", DEFAULTS["STRICT_ERRORS"])
     out.setdefault("NEMO_WRITE_LP", DEFAULTS["NEMO_WRITE_LP"])
     out.setdefault("RUN_POSTPROCESS_ONLY", DEFAULTS.get("RUN_POSTPROCESS_ONLY", False))
+    out.setdefault("SAVE_TEST_SNAPSHOT", DEFAULTS.get("SAVE_TEST_SNAPSHOT", False))
+    out.setdefault("VARS_TO_SAVE", DEFAULTS["VARS_TO_SAVE"])
+    vars_to_save = out.get("VARS_TO_SAVE") or []
+    if vars_to_save:
+        known = set(VARS_TO_SAVE_AVAILABLE)
+        unknown = [v for v in vars_to_save if str(v) not in known]
+        if unknown:
+            print(f"WARNING: VARS_TO_SAVE has unknown entries: {unknown}")
     return out
 
-__all__ = ["DEFAULTS", "LEAP_TEMPLATE_DEFAULTS", "apply_defaults"]
+__all__ = [
+    "DEFAULTS",
+    "DEFAULT_PARAMS",
+    "VARS_TO_SAVE_AVAILABLE",
+    "LEAP_TEMPLATE_DEFAULTS",
+    "apply_defaults",
+]
