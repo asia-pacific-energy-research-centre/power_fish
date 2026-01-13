@@ -1,0 +1,22 @@
+Economy,Economy_name,Alt_name,Alt_name2,Alt_name3,iso_code,alt_aperc_name
+01_AUS,Australia,,,,AUS,
+02_BD,Brunei Darussalam,Brunei,,,BRN,
+03_CDA,Canada,,,,CAN,
+04_CHL,Chile,,,,CHL,
+05_PRC,China,People's Republic of China,"China, People's Republic of",,CHN,
+06_HKC,Hong Kong,Hong Kong Special Administrative Region,Hong Kong Special Administrative Region of the People's Republic of China,Hong Kong SAR,HKG,
+07_INA,Indonesia,,,,IDN,
+08_JPN,Japan,,,,JPN,
+09_ROK,Korea,South Korea,"Korea, Republic of (South Korea)","Korea, Republic of",KOR,
+10_MAS,Malaysia,,,,MYS,
+11_MEX,Mexico,,,,MEX,
+12_NZ,New Zealand,,,,NZL,
+13_PNG,Papua New Guinea,,,,PNG,
+14_PE,Peru,,,,PER,
+15_PHL,Philippines,,,,PHL,15_RP
+16_RUS,Russia,Russian Federation,,,RUS,
+17_SGP,Singapore,,,,SGP,17_SIN
+18_CT,Chinese Taipei,Taiwan,Taiwan Province of China,,TWN,
+19_THA,Thailand,,,,THA,
+20_USA,USA,United States Of America,United States,,USA,
+21_VN,Viet Nam,Vietnam,,,VNM,

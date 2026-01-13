@@ -1,10 +1,14 @@
 #%%
 from pathlib import Path
 import os
+import shutil
+import time
 
 from convert_osemosys_input_to_nemo import (
     convert_osemosys_input_to_nemo,
     dump_db_to_entry_excel,
+    export_results_to_excel,
+    export_results_to_excel_wide,
     PARAM_SPECS,
 )
 from build_leap_import_template import (
@@ -19,9 +23,15 @@ from nemo_core import (
     prepare_run_context,
     run_diagnostics,
     make_dummy_workbook,
-    apply_defaults,
 )
-from utils.pipeline_helpers import print_run_summary
+from config_defaults import apply_defaults
+from utils.pipeline_helpers import (
+    print_run_summary,
+    _as_bool,
+    run_postprocess_steps,
+    save_latest_run_snapshot,
+)
+from plotting.plotly_dashboard import generate_plotly_dashboard
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "data"
@@ -29,21 +39,29 @@ TEST_DIR = PROJECT_ROOT / "data" / "tests"
 LOG_DIR = PROJECT_ROOT / "results" / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
+
 # -------------------------------------------------------------------
 # USER CONFIGURATION
 # -------------------------------------------------------------------
 USER_VARS = {
     ################################
     # Input paths
-    "OSEMOSYS_EXCEL_PATH": DATA_DIR / "ORIGINAL_OSEMOSYS_INPUT_SHEET_DO_NOT_MOD.xlsx",
-    "NEMO_ENTRY_EXCEL_PATH": DATA_DIR / "nemo_entry_dump_dan.xlsx",
+    "OSEMOSYS_EXCEL_PATH": DATA_DIR / "POWER 20_USA_data_REF9_S3_test.xlsx",# - no heat.xlsx",
+    "NEMO_ENTRY_EXCEL_PATH": DATA_DIR / "nemo_entry_dump_reflection.xlsx",# - storage test 2.xlsx",#nemo_entry_dump.xlsx",
+    # Optional NEMO config (nemo.cfg / nemo.ini). When set, Julia runs from the parent dir
+    # so NEMO can pick it up; leave as None to skip.
+    "NEMO_CONFIG_PATH": DATA_DIR / "nemo.cfg",
     ################################
     # Scenario/name
     "SCENARIO": "Reference",
+    "ECONOMY": "United States Of America",
+    ################################
     # Export populated NEMO DB to Excel
-    "EXPORT_DB_TO_EXCEL_PATH": DATA_DIR / "nemo_entry_dump_dan.xlsx",
+    "EXPORT_DB_TO_EXCEL_PATH": DATA_DIR / "nemo_entry_dump_reflection2.xlsx",
+    "EXPORT_RESULTS_TO_EXCEL_PATH": PROJECT_ROOT / "results" / "results.xlsx",
+    "EXPORT_RESULTS_WIDE_TO_EXCEL_PATH": PROJECT_ROOT / "results" / "results_wide.xlsx",
     # Years to use (None keeps all)
-    "YEARS_TO_USE": [y for y in range(2017, 2019+1)],
+    "YEARS_TO_USE": [y for y in range(2020, 2050+1)],
     # LEAP template export
     "GENERATE_LEAP_TEMPLATE": False,
     "LEAP_TEMPLATE_OUTPUT": DATA_DIR / "leap_import_template.xlsx",
@@ -54,7 +72,7 @@ USER_VARS = {
     # skip conversion and run a test DB
     #   - Point to a local .sqlite or .xlsx via TEST_INPUT_PATH (Excel will be converted)
     #   - Or auto-download an upstream NEMO test DB via NEMO_TEST_NAME (stored in data/nemo_tests/)
-    "TEST_INPUT_PATH": DATA_DIR / TEST_DIR /"nemo_entry_dump - storage_test.xlsx",
+    "TEST_INPUT_PATH": DATA_DIR / TEST_DIR /"nemo_entry_dump - storage test.xlsx",
     "NEMO_TEST_NAME": "storage_test",  # options: storage_test, storage_transmission_test, ramp_test, or solver test names like cbc_tests/glpk_tests to auto-download and run the upstream solver test script
     "TEST_EXPORT_DB_TO_EXCEL_PATH": DATA_DIR / TEST_DIR / "test_output_dump.xlsx",
     ################################  
@@ -73,7 +91,34 @@ def main(mode: str | None = None, run_nemo: bool = True):
       4) Run NEMO once when run_nemo=True
       5) When GENERATE_LEAP_TEMPLATE is true, build the LEAP import template after NEMO finishes
     """
+    start = time.time()
     cfg = dict(VARS)
+    # Allow env override for postprocess flag (e.g., RUN_POSTPROCESS_ONLY=true)
+    env_rpo = os.environ.get("RUN_POSTPROCESS_ONLY")
+    if env_rpo is not None:
+        cfg["RUN_POSTPROCESS_ONLY"] = env_rpo
+    # Mode override: mode='results' forces postprocess-only
+    if mode and mode.lower() == "results":
+        cfg["RUN_POSTPROCESS_ONLY"] = True
+    rpo_val = _as_bool(cfg.get("RUN_POSTPROCESS_ONLY"))
+
+    # Skip conversion/NEMO and just run exports/plots on an existing DB.
+    if rpo_val:
+        print("RUN_POSTPROCESS_ONLY=True: skipping conversion and NEMO run, proceeding to exports/plots only.")
+        db_path = Path(cfg["OUTPUT_DB"])
+        cfg["RUN_MODE"] = "postprocess"
+        if not db_path.exists():
+            raise FileNotFoundError(f"RUN_POSTPROCESS_ONLY=True but OUTPUT_DB not found at '{db_path}'")
+        print_run_summary(cfg, LOG_DIR, postprocess_only=True)
+        if cfg.get("SAVE_TEST_SNAPSHOT"):
+            save_latest_run_snapshot(cfg, PROJECT_ROOT)
+        # Ensure we never run Julia when postprocessing
+        run_nemo = False
+        run_postprocess_steps(cfg, db_path, PROJECT_ROOT)
+        elapsed = time.time() - start
+        mins, secs = divmod(int(elapsed), 60)
+        print(f"Run time: {mins}m{secs:02d}s")
+        return
     # Default mode if not provided
     mode = (mode or "nemo_entry").lower()
     mode_aliases = {
@@ -85,7 +130,11 @@ def main(mode: str | None = None, run_nemo: bool = True):
     # Handle test shortcut (skip conversion) only when mode=='test'
     if mode == "test":
         cfg["RUN_MODE"] = mode
+        cfg.setdefault("NO_DATEID", True)
         if handle_test_run(cfg, DATA_DIR, LOG_DIR, run_nemo):
+            elapsed = time.time() - start
+            mins, secs = divmod(int(elapsed), 60)
+            print(f"Run time: {mins}m{secs:02d}s")
             return
         raise RuntimeError("Test mode selected but no test input configured.")
 
@@ -99,10 +148,17 @@ def main(mode: str | None = None, run_nemo: bool = True):
                 "Point OUTPUT_DB to an existing NEMO database."
             )
         print_run_summary(cfg, LOG_DIR)
+        if cfg.get("SAVE_TEST_SNAPSHOT"):
+            save_latest_run_snapshot(cfg, PROJECT_ROOT)
+        elapsed = time.time() - start
+        mins, secs = divmod(int(elapsed), 60)
+        print(f"Run time: {mins}m{secs:02d}s")
     else:
         # Configure mode specifics and ensure template DB
         cfg = prepare_run_context(cfg, DATA_DIR, mode, LOG_DIR)
         print_run_summary(cfg, LOG_DIR)
+        if cfg.get("SAVE_TEST_SNAPSHOT"):
+            save_latest_run_snapshot(cfg, PROJECT_ROOT)
 
         # Convert (handles both osemosys and nemo_entry)
         convert_osemosys_input_to_nemo(cfg, VERBOSE_ERRORS=True)
@@ -127,15 +183,21 @@ def main(mode: str | None = None, run_nemo: bool = True):
             julia_exe=cfg.get("JULIA_EXE"),
             log_path=LOG_DIR / "nemo_run.log",
             stream_output=True,
+            config_path=cfg.get("NEMO_CONFIG_PATH"),
+            varstosave=cfg.get("VARS_TO_SAVE"),
         )
-    if cfg.get("GENERATE_LEAP_TEMPLATE"):
-        generate_leap_template(
-            scenario=cfg.get("SCENARIO"),
-            region=cfg.get("LEAP_TEMPLATE_REGION"),
-            nemo_db_path=db_path,
-            output_path=cfg.get("LEAP_TEMPLATE_OUTPUT"),
-            import_id_source=cfg.get("LEAP_IMPORT_ID_SOURCE"),
-        )
+        # Save a copy of the solved DB to results for plotting/postprocessing
+        final_db_path = PROJECT_ROOT / "results" / "nemo_final.sqlite"
+        final_db_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(db_path, final_db_path)
+        cfg["OUTPUT_DB"] = final_db_path
+        db_path = final_db_path
+
+    # Postprocess outputs
+    run_postprocess_steps(cfg, db_path, PROJECT_ROOT)
+    elapsed = time.time() - start
+    mins, secs = divmod(int(elapsed), 60)
+    print(f"Run time: {mins}m{secs:02d}s")
 
 #%%
 # modes:
@@ -144,12 +206,9 @@ def main(mode: str | None = None, run_nemo: bool = True):
 #     "db_only",
 #     "dummy",
 #     # "test",  # test a DB flow set by NEMO_TEST_NAME
-# 
+#    "results"  # postprocess-only mode (skip conversion and NEMO run)
+#%%
 if __name__ == "__main__":
-    main('nemo_input_xlsx')
+    main('osemosys_input_xlsx')#results')
 
 # %%
-
-
-## Daniel's notes - what changes were made
-## Gave 2019 values of 99999 for CHP oil and other - to deal with infeasibilities

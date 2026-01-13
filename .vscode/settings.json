@@ -1,0 +1,9 @@
+{
+  "workbench.editorAssociations": {
+    "*.xlsx": "cweijan.office-viewer",
+    "*.csv": "cweijan.office-viewer",
+    "*.md": "default",
+    "*.docx": "default",
+    "*.pptx": "default"
+  }
+}

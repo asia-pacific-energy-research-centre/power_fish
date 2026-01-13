@@ -1,5 +1,0 @@
-Changed upper activity bound for oil CHP to 100
-
-Changed upper activity bound for wind to 10000
-
-Reserve margin - switched to fractional
