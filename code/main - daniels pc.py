@@ -54,6 +54,8 @@ USER_VARS = {
     ################################
     # Scenario/name
     "SCENARIO": "Reference",
+    "ECONOMY": "United States Of America",
+    ################################
     # Export populated NEMO DB to Excel
     "EXPORT_DB_TO_EXCEL_PATH": DATA_DIR / "nemo_entry_dump_v3 - Copy.xlsx",
     "EXPORT_RESULTS_TO_EXCEL_PATH": PROJECT_ROOT / "results" / "results.xlsx",

@@ -393,7 +393,7 @@ def generate_plotly_dashboard(
     for fig in figs:
         _normalize_fig_labels(fig)
 
-    _persist_missing_colors(missing_colors, mapping.get("colors", {}))
+    _persist_missing_colors(missing_colors, mapping.get("colors", {}), mapping)
 
     create_dashboard_html(
         figs=figs,
@@ -610,6 +610,13 @@ def _load_mapping() -> dict:
     }
 
 
+def _normalize_color_label(value) -> str | None:
+    if value is None or pd.isna(value):
+        return None
+    cleaned = str(value).strip()
+    return cleaned or None
+
+
 def _load_missing_colors() -> set[str]:
     if not MISSING_COLOR_CSV.exists():
         return set()
@@ -617,30 +624,46 @@ def _load_missing_colors() -> set[str]:
         df = pd.read_csv(MISSING_COLOR_CSV)
         labels = []
         for raw in df.get("label", pd.Series([], dtype=str)).tolist():
-            if pd.isna(raw):
+            cleaned = _normalize_color_label(raw)
+            if cleaned is None:
                 continue
-            cleaned = str(raw).strip()
-            if cleaned:
-                labels.append(cleaned)
+            labels.append(cleaned)
         return set(labels)
     except Exception:
         return set()
 
 
-def _persist_missing_colors(missing: set[str], color_map: dict):
+def _build_mapping_lookup(df: pd.DataFrame | None) -> dict[str, str]:
+    if df is None or "long_name" not in df or "plotting_name" not in df:
+        return {}
+    pairs = df[["long_name", "plotting_name"]].dropna()
+    lookup: dict[str, str] = {}
+    for long_name, plotting_name in zip(pairs["long_name"], pairs["plotting_name"]):
+        key = _normalize_color_label(long_name)
+        value = _normalize_color_label(plotting_name)
+        if key and value:
+            lookup[key] = value
+    return lookup
+
+
+def _persist_missing_colors(missing: set[str], color_map: dict, mapping: dict | None = None):
     """Update missing color CSV by removing resolved labels and adding new ones."""
     existing = _load_missing_colors()
-    normalized_missing = {
-        str(label).strip()
-        for label in missing
-        if label is not None and not pd.isna(label) and str(label).strip()
-    }
-    known = {
-        str(k).strip()
-        for k in (color_map or {}).keys()
-        if k is not None and not pd.isna(k) and str(k).strip()
-    }
-    updated = (existing | normalized_missing) - known
+    normalized_missing = {label for label in (_normalize_color_label(v) for v in missing) if label}
+    known = {label for label in (_normalize_color_label(v) for v in (color_map or {}).keys()) if label}
+    updated = existing | normalized_missing
+    if updated:
+        powerplant_lookup = _build_mapping_lookup((mapping or {}).get("powerplant"))
+        fuel_lookup = _build_mapping_lookup((mapping or {}).get("fuel"))
+        resolved = set()
+        for label in updated:
+            if label in known:
+                resolved.add(label)
+                continue
+            mapped = powerplant_lookup.get(label) or fuel_lookup.get(label)
+            if mapped and mapped in known:
+                resolved.add(label)
+        updated = updated - resolved
     if not updated:
         if MISSING_COLOR_CSV.exists():
             MISSING_COLOR_CSV.unlink(missing_ok=True)
