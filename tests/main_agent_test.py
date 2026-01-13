@@ -56,7 +56,7 @@ AGENT_TEST_RUNTIME_STATE = TESTS_ROOT / "last_run" / "runtime.json"
 AGENT_TEST_OVERRIDES = {
     "RUN_POSTPROCESS_ONLY": False,  # True for mode="results" to skip conversion/NEMO
     "NO_DATEID": True,
-    "ECONOMY": "TEST",
+    "ECONOMY": "USA",
     "RUN_DIAGNOSTICS": False,
     "EXPORT_DB_TO_EXCEL": False,
     "EXPORT_RESULTS_TO_EXCEL": True,
@@ -65,6 +65,7 @@ AGENT_TEST_OVERRIDES = {
     "PLOTLY_DASHBOARD_PATH": TESTS_ROOT / "plotting_output" / "agent_dashboard.html",
     "PLOTLY_CONFIG_YAML": PROJECT_ROOT / "config" / "plotly_charts.yml",
     "PLOTLY_PNG_DIR": TESTS_ROOT / "plotting_output" / "png",
+    "ECONOMY_CODE_MAP_PATH": PROJECT_ROOT / "config" / "economy_code_to_name.csv",
     # Keep None to avoid trim costs for quick tests; set to a small list when needed.
     "YEARS_TO_USE": None,
 }

@@ -54,6 +54,8 @@ USER_VARS = {
     ################################
     # Scenario/name
     "SCENARIO": "Reference",
+    "ECONOMY": "United States Of America",
+    ################################
     # Export populated NEMO DB to Excel
     "EXPORT_DB_TO_EXCEL_PATH": DATA_DIR / "nemo_entry_dump_reflection2.xlsx",
     "EXPORT_RESULTS_TO_EXCEL_PATH": PROJECT_ROOT / "results" / "results.xlsx",
@@ -205,16 +207,8 @@ def main(mode: str | None = None, run_nemo: bool = True):
 #     "dummy",
 #     # "test",  # test a DB flow set by NEMO_TEST_NAME
 #    "results"  # postprocess-only mode (skip conversion and NEMO run)
-# 
-# print('to do let daniel know that the nemo_entry_dump - storage test.xlsx file may be misspelled as nemo_entry_dump - storage_test.xlsx within the data/tests folder. If you wanted to  run it thorugh the regular process, you also need to chang the years')
-# print('todo add an error for when the yers we want arent in the input data. since thats A COMOMN ACCIDENT. also we actually dont even have a way of processing the results...')
-# i tink if we create a default params sheet itll be good.
-#will also need to change the leap template creator so it doesnt accidntlaly pull results tables from hte sqlite db - but not Variablecosts!
 #%%
 if __name__ == "__main__":
     main('osemosys_input_xlsx')#results')
 
 # %%
-
-## Daniel's notes - what changes were made
-## Gave 2019 values of 99999 for CHP oil and other - to deal with infeasibilities

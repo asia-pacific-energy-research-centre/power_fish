@@ -53,15 +53,22 @@ def apply_common_cleaning(df: pd.DataFrame, category_col: str, opts: dict) -> pd
     return df
 
 
+def _normalize_color_label(label) -> str | None:
+    if label is None:
+        return None
+    return str(label).strip() or None
+
+
 def update_missing_colors(labels: Iterable, color_map: dict, missing: set[str]):
     if not color_map:
         return
-    known = {str(k) for k in color_map.keys()}
+    known = {v for k in color_map.keys() if (v := _normalize_color_label(k))}
     for label in labels:
-        if label is None:
+        normalized = _normalize_color_label(label)
+        if normalized is None:
             continue
-        if str(label) not in known:
-            missing.add(str(label))
+        if normalized not in known:
+            missing.add(normalized)
 
 
 def normalize_function_figs(fn_cfg) -> list[tuple[str, dict]]:

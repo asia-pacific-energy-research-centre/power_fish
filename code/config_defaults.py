@@ -18,6 +18,7 @@ DEFAULTS = {
     "PLOTLY_CONFIG_YAML": Path("../config/plotly_charts.yml"),
     "PLOTLY_DASHBOARD_PATH": None,
     "PLOTLY_PNG_DIR": None,
+    "ECONOMY_CODE_MAP_PATH": Path("../config/economy_code_to_name.xlsx"),
     # Optional: auto-generate EmissionActivityRatio from fuel factors
     "EMISSIONS_FACTOR_CSV": Path("../config/9th_edition_emission_factors.csv"),
     "EMISSIONS_LABEL": "CO2",
@@ -192,6 +193,9 @@ def apply_defaults(user_vars: dict, data_dir: Path) -> dict:
     if "PLOTLY_CONFIG_YAML" not in out:
         cfg_path = DEFAULTS["PLOTLY_CONFIG_YAML"]
         out["PLOTLY_CONFIG_YAML"] = Path(cfg_path)
+    if "ECONOMY_CODE_MAP_PATH" not in out:
+        map_path = DEFAULTS["ECONOMY_CODE_MAP_PATH"]
+        out["ECONOMY_CODE_MAP_PATH"] = Path(map_path)
     out.setdefault("NEMO_TEST_EXCEL_PATH", data_dir / DEFAULTS["TEST_EXPORT_EXCEL_PATH"])  # backward compat name
     out.setdefault("AUTO_CREATE_TEMPLATE_DB", DEFAULTS["AUTO_CREATE_TEMPLATE_DB"])
     out.setdefault("JULIA_EXE", DEFAULTS["JULIA_EXE"])

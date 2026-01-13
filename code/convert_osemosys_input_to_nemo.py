@@ -5,7 +5,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 from shutil import copyfile
-from typing import Any, Mapping, DefaultDict
+from typing import Any, Mapping, DefaultDict, Optional
 from collections import defaultdict
 
 from config_defaults import DEFAULT_PARAMS
@@ -296,6 +296,16 @@ SET_SHEETS = {
     "YEAR": "YEAR",
 }
 
+ECONOMY_MAP_COLUMNS = [
+    "ECONOMY",
+    "ECONOMY_NAME",
+    "ALT_NAME",
+    "ALT_NAME2",
+    "ALT_NAME3",
+    "ISO_CODE",
+    "ALT_APERC_NAME",
+]
+
 
 # -------------------------------------------------------------------
 # HELPERS
@@ -334,6 +344,172 @@ def load_sheet(excel_path: Path, sheet_name: str) -> pd.DataFrame:
 
     df.columns = [str(c).strip().upper() for c in df.columns]
     return _coerce_df_scalars(df)
+
+
+def _normalize_mapping_value(value: Any) -> Optional[str]:
+    if value is None or pd.isna(value):
+        return None
+    cleaned = str(value).strip()
+    return cleaned or None
+
+
+def _normalize_mapping_column(col: Any) -> str:
+    return "".join(str(col).strip().split()).upper().replace("-", "_")
+
+
+def _resolve_economy_map_path(map_path: Path) -> Path:
+    if map_path.exists():
+        return map_path
+    if map_path.suffix.lower() in {".xlsx", ".xls"}:
+        csv_path = map_path.with_suffix(".csv")
+        if csv_path.exists():
+            print(f"Economy mapping '{map_path}' not found; falling back to '{csv_path}'.")
+            return csv_path
+    return map_path
+
+
+def _load_economy_mapping(map_path: Path) -> pd.DataFrame:
+    map_path = _resolve_economy_map_path(Path(map_path))
+    if not map_path.exists():
+        raise FileNotFoundError(
+            f"Economy mapping file not found at '{map_path}'. "
+            "Provide ECONOMY_CODE_MAP_PATH or add config/economy_code_to_name.xlsx."
+        )
+    try:
+        if map_path.suffix.lower() == ".csv":
+            df = pd.read_csv(map_path)
+        else:
+            df = pd.read_excel(map_path)
+    except Exception as exc:
+        raise RuntimeError(f"Failed to read economy mapping '{map_path}': {exc}") from exc
+    df = df.rename(columns={c: _normalize_mapping_column(c) for c in df.columns})
+    missing_cols = [c for c in ("ECONOMY", "ECONOMY_NAME") if c not in df.columns]
+    if missing_cols:
+        raise ValueError(
+            f"Economy mapping missing required columns {missing_cols} in '{map_path}'."
+        )
+    return df
+
+
+def _build_economy_lookups(df: pd.DataFrame) -> tuple[dict, dict]:
+    lookup: dict[str, str] = {}
+    aliases_by_name: dict[str, set[str]] = {}
+    for _, row in df.iterrows():
+        economy_name = _normalize_mapping_value(row.get("ECONOMY_NAME"))
+        if not economy_name:
+            continue
+        aliases = set()
+        for col in ECONOMY_MAP_COLUMNS:
+            val = _normalize_mapping_value(row.get(col))
+            if val:
+                aliases.add(val)
+        if not aliases:
+            aliases.add(economy_name)
+        normalized_aliases = {alias.casefold() for alias in aliases}
+        existing_aliases = aliases_by_name.get(economy_name, set())
+        aliases_by_name[economy_name] = existing_aliases | normalized_aliases
+        for alias in normalized_aliases:
+            current = lookup.get(alias)
+            if current and current != economy_name:
+                raise ValueError(
+                    f"Economy mapping alias '{alias}' maps to both '{current}' and '{economy_name}'."
+                )
+            lookup[alias] = economy_name
+    return lookup, aliases_by_name
+
+
+def _collect_region_values(excel_path: Path) -> set[str]:
+    regions: set[str] = set()
+    try:
+        excel_file = pd.ExcelFile(excel_path)
+    except Exception as exc:
+        print(f"Failed to read workbook '{excel_path}' for REGION check: {exc}")
+        return regions
+
+    sheet_map = {str(name).strip().upper(): name for name in excel_file.sheet_names}
+    region_sheet = sheet_map.get("REGION")
+    if region_sheet:
+        try:
+            df = pd.read_excel(excel_path, sheet_name=region_sheet)
+            df.columns = [str(c).strip().upper() for c in df.columns]
+            if "VALUE" in df.columns:
+                for val in df["VALUE"].dropna().tolist():
+                    cleaned = _normalize_mapping_value(val)
+                    if cleaned:
+                        regions.add(cleaned)
+            elif "REGION" in df.columns:
+                for val in df["REGION"].dropna().tolist():
+                    cleaned = _normalize_mapping_value(val)
+                    if cleaned:
+                        regions.add(cleaned)
+        except Exception as exc:
+            print(f"Failed to read REGION sheet for economy validation: {exc}")
+
+    if regions:
+        return regions
+
+    for sheet_name in excel_file.sheet_names:
+        try:
+            df = pd.read_excel(
+                excel_path,
+                sheet_name=sheet_name,
+                usecols=lambda c: str(c).strip().upper() == "REGION",
+            )
+        except ValueError:
+            continue
+        except Exception as exc:
+            print(f"Failed to read REGION column from '{sheet_name}': {exc}")
+            continue
+        if df.empty:
+            continue
+        col = df.columns[0]
+        for val in df[col].dropna().tolist():
+            cleaned = _normalize_mapping_value(val)
+            if cleaned:
+                regions.add(cleaned)
+    return regions
+
+
+def _resolve_economy_from_regions(
+    excel_path: Path,
+    map_path: Path,
+    user_economy: Any,
+) -> tuple[str, set[str]]:
+    regions = _collect_region_values(excel_path)
+    if not regions:
+        raise ValueError(
+            f"No REGION values found in '{excel_path}'. "
+            "Add a REGION set sheet or REGION column to the input workbook."
+        )
+    mapping = _load_economy_mapping(map_path)
+    lookup, aliases_by_name = _build_economy_lookups(mapping)
+    matched_names = set()
+    missing = []
+    for region in regions:
+        normalized = region.casefold()
+        economy_name = lookup.get(normalized)
+        if not economy_name:
+            missing.append(region)
+            continue
+        matched_names.add(economy_name)
+    if missing:
+        raise ValueError(
+            f"REGION value(s) not found in economy mapping '{map_path}': {missing}"
+        )
+    if len(matched_names) > 1:
+        raise ValueError(
+            f"Multiple economies found for REGION values {sorted(regions)}: {sorted(matched_names)}"
+        )
+    resolved = next(iter(matched_names))
+    user_clean = _normalize_mapping_value(user_economy)
+    if user_clean:
+        allowed = aliases_by_name.get(resolved, set())
+        if user_clean.casefold() not in allowed:
+            raise ValueError(
+                f"ECONOMY '{user_economy}' does not match REGION value(s) {sorted(regions)} within the Osemosys input. "
+                f"Expected economy '{resolved}'."
+            )
+    return resolved, regions
 
 
 def _cleanup_unused_sets(conn: sqlite3.Connection):
@@ -1551,6 +1727,21 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any], VERBOSE_ERRORS: bo
     enable_transmission = bool(config.get("ENABLE_NEMO_TRANSMISSION_METHODS", True))
     remap_demand_fuels = bool(config.get("REMAP_DEMAND_FUELS_AND_STRIP_TRANSMISSION_TECHS", False))
     strict_errors = bool(config.get("STRICT_ERRORS", False))
+    excel_path = osemosys_excel_path if input_mode == "osemosys" else nemo_entry_excel_path
+    economy_map_path = Path(
+        config.get("ECONOMY_CODE_MAP_PATH") or Path("config/economy_code_to_name.xlsx")
+    )
+    resolved_economy, regions = _resolve_economy_from_regions(
+        excel_path,
+        economy_map_path,
+        config.get("ECONOMY"),
+    )
+    try:
+        config["ECONOMY"] = resolved_economy
+    except TypeError:
+        pass
+    print(f"Resolved ECONOMY '{resolved_economy}' from REGION value(s): {sorted(regions)}")
+
     export_db_to_excel = bool(config.get("EXPORT_DB_TO_EXCEL", False))
     EXPORT_DB_TO_EXCEL_PATH = _format_output_path(
         config.get("EXPORT_DB_TO_EXCEL_PATH", output_db.with_suffix(".xlsx")),
@@ -1558,8 +1749,6 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any], VERBOSE_ERRORS: bo
         output_db,
     )
     export_table_filter = config.get("EXPORT_TABLE_FILTER", None)
-
-    excel_path = osemosys_excel_path if input_mode == "osemosys" else nemo_entry_excel_path
 
     print(f"Reading input workbook ({input_mode}) from '{excel_path}'.")
     try:
