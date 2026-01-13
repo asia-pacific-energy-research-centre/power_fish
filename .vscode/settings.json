@@ -11,6 +11,9 @@
     "*.md": "default",
     "*.docx": "default",
     "*.pptx": "default"
-  }
+},
+"python-envs.defaultEnvManager": "ms-python.python:conda",
+"python-envs.defaultPackageManager": "ms-python.python:conda",
+"python-envs.pythonProjects": []
 }
 >>>>>>> 6c1a2ea (large changes to testing and postprocessing)
