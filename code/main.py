@@ -36,14 +36,14 @@ USER_VARS = {
     ################################
     # Input paths
     "OSEMOSYS_EXCEL_PATH": DATA_DIR / "ORIGINAL_OSEMOSYS_INPUT_SHEET_DO_NOT_MOD.xlsx",
-    "NEMO_ENTRY_EXCEL_PATH": DATA_DIR / "nemo_entry_dump_dan.xlsx",
+    "NEMO_ENTRY_EXCEL_PATH": DATA_DIR / "nemo_entry_dump_v3 - Copy.xlsx",
     ################################
     # Scenario/name
     "SCENARIO": "Reference",
     # Export populated NEMO DB to Excel
-    "EXPORT_DB_TO_EXCEL_PATH": DATA_DIR / "nemo_entry_dump_dan.xlsx",
+    "EXPORT_DB_TO_EXCEL_PATH": DATA_DIR / "nemo_entry_dump_v3 - Copy.xlsx",
     # Years to use (None keeps all)
-    "YEARS_TO_USE": [y for y in range(2017, 2019+1)],
+    "YEARS_TO_USE": [y for y in range(2023, 2059+1)],
     # LEAP template export
     "GENERATE_LEAP_TEMPLATE": False,
     "LEAP_TEMPLATE_OUTPUT": DATA_DIR / "leap_import_template.xlsx",
@@ -54,7 +54,7 @@ USER_VARS = {
     # skip conversion and run a test DB
     #   - Point to a local .sqlite or .xlsx via TEST_INPUT_PATH (Excel will be converted)
     #   - Or auto-download an upstream NEMO test DB via NEMO_TEST_NAME (stored in data/nemo_tests/)
-    "TEST_INPUT_PATH": DATA_DIR / TEST_DIR /"nemo_entry_dump - storage_test.xlsx",
+    "TEST_INPUT_PATH": DATA_DIR / TEST_DIR /"storage_test_dump.xlsx",
     "NEMO_TEST_NAME": "storage_test",  # options: storage_test, storage_transmission_test, ramp_test, or solver test names like cbc_tests/glpk_tests to auto-download and run the upstream solver test script
     "TEST_EXPORT_DB_TO_EXCEL_PATH": DATA_DIR / TEST_DIR / "test_output_dump.xlsx",
     ################################  
@@ -149,7 +149,3 @@ if __name__ == "__main__":
     main('nemo_input_xlsx')
 
 # %%
-
-
-## Daniel's notes - what changes were made
-## Gave 2019 values of 99999 for CHP oil and other - to deal with infeasibilities
