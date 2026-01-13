@@ -19,7 +19,9 @@
 *.lp
 !.gitkeep
 !data/POWER\ 20_USA_data_REF9_S3_test.xlsx
-
+# Ignore VS Code settings and test last-run config
+.vscode/settings.json
+tests/last_run/config.json
 env_leap/*
 #######################################
 
