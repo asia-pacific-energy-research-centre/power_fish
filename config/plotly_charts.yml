@@ -3,6 +3,8 @@ no_columns: 2 #rows will be auto-calculated
 # output_name supports tokens: {ECONOMY}, {SCENARIO}, {INPUTNAME}, {RUN_MODE}, {DATEID}
 # Example: dashboard_{ECONOMY}_{SCENARIO}_{DATEID}.html
 output_name: dashboard_{ECONOMY}_{SCENARIO}_{DATEID}.html # optional; relative to results/plots
+# dashboard_title supports the same tokens as output_name
+dashboard_title: NEMO Power model dashboard - {SCENARIO} - {ECONOMY}
 # Global plotting options
 # - top_n_categories: keep only the top N categories (by total VALUE) for any plot
 #   unless overridden in a specific plot's function_options / options.

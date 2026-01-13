@@ -262,6 +262,7 @@ def generate_plotly_dashboard(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     yaml_cfg = load_plotly_config_yaml(config_yaml) if config_yaml else {}
     output_path = _resolve_dashboard_output_path(output_path, yaml_cfg, name_tokens)
+    dashboard_title = _build_dashboard_title(yaml_cfg, name_tokens)
     plots_cfg = plots_config_dict or yaml_cfg.get("dict_figs")
     top_n_default = yaml_cfg.get("top_n_categories", DEFAULT_TOP_N_CATEGORIES)
     cleaning_defaults = {
@@ -394,7 +395,13 @@ def generate_plotly_dashboard(
 
     _persist_missing_colors(missing_colors, mapping.get("colors", {}))
 
-    create_dashboard_html(figs=figs, output_path=output_path, layout=layout, no_columns=no_columns)
+    create_dashboard_html(
+        figs=figs,
+        output_path=output_path,
+        layout=layout,
+        no_columns=no_columns,
+        title_text=dashboard_title,
+    )
     if export_png_dir:
         _export_figs_to_png(figs, Path(export_png_dir))
     return output_path
@@ -416,6 +423,22 @@ def _resolve_dashboard_output_path(output_path: Path, yaml_cfg: dict, name_token
     if not candidate.is_absolute():
         candidate = output_path.parent / candidate
     return candidate
+
+
+def _build_dashboard_title(yaml_cfg: dict, name_tokens: dict | None) -> str:
+    template = (yaml_cfg.get("dashboard_title") or "").strip()
+    if not template:
+        return "NEMO Results Dashboard"
+    return _apply_display_tokens(template, name_tokens or {})
+
+
+def _apply_display_tokens(value: str, tokens: dict) -> str:
+    out = value
+    for key, val in tokens.items():
+        token = f"{{{key}}}"
+        if token in out and val is not None:
+            out = out.replace(token, str(val))
+    return out.strip() or "NEMO Results Dashboard"
 
 
 def _apply_name_tokens(value: str, tokens: dict) -> str:
@@ -465,13 +488,20 @@ def _grid_cols(count: int, no_columns: int | None = None) -> int:
     return best_cols
 
 
-def create_dashboard_html(figs: list, output_path: Path, layout: str = "scroll", no_columns: int | None = None):
+def create_dashboard_html(
+    figs: list,
+    output_path: Path,
+    layout: str = "scroll",
+    no_columns: int | None = None,
+    title_text: str | None = None,
+):
     """Create an HTML dashboard from plotly figures.
 
     layout="scroll" -> CSS grid of individual HTML fragments (scrollable if many).
     layout="grid"   -> single Plotly figure with subplots (no scrolling; legends de-duped, placed right).
     """
     grid_cols = _grid_cols(len(figs), no_columns=no_columns)
+    title_text = (title_text or "NEMO Results Dashboard").strip() or "NEMO Results Dashboard"
 
     if layout == "grid":
         # Legacy-style grid: single figure with subplots; no scrolling expected.
@@ -499,7 +529,7 @@ def create_dashboard_html(figs: list, output_path: Path, layout: str = "scroll",
             lambda tr: tr.update(showlegend=False) if (tr.name in names) else names.add(tr.name)
         )
         combo.update_layout(
-            title_text="NEMO Results Dashboard",
+            title_text=title_text,
             legend=dict(
                 orientation="v",
                 x=1.02,
@@ -540,10 +570,10 @@ def create_dashboard_html(figs: list, output_path: Path, layout: str = "scroll",
 
     html = [
         "<html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
-        "<title>NEMO Results Dashboard</title>",
+        f"<title>{title_text}</title>",
         style,
         "</head><body>",
-        "<h1>NEMO Results Dashboard</h1>",
+        f"<h1>{title_text}</h1>",
         "<div class='grid'>",
     ]
     for block in html_blocks:
@@ -585,7 +615,14 @@ def _load_missing_colors() -> set[str]:
         return set()
     try:
         df = pd.read_csv(MISSING_COLOR_CSV)
-        return set(df["label"].astype(str).tolist())
+        labels = []
+        for raw in df.get("label", pd.Series([], dtype=str)).tolist():
+            if pd.isna(raw):
+                continue
+            cleaned = str(raw).strip()
+            if cleaned:
+                labels.append(cleaned)
+        return set(labels)
     except Exception:
         return set()
 
@@ -593,8 +630,17 @@ def _load_missing_colors() -> set[str]:
 def _persist_missing_colors(missing: set[str], color_map: dict):
     """Update missing color CSV by removing resolved labels and adding new ones."""
     existing = _load_missing_colors()
-    known = {str(k) for k in (color_map or {}).keys()}
-    updated = (existing | missing) - known
+    normalized_missing = {
+        str(label).strip()
+        for label in missing
+        if label is not None and not pd.isna(label) and str(label).strip()
+    }
+    known = {
+        str(k).strip()
+        for k in (color_map or {}).keys()
+        if k is not None and not pd.isna(k) and str(k).strip()
+    }
+    updated = (existing | normalized_missing) - known
     if not updated:
         if MISSING_COLOR_CSV.exists():
             MISSING_COLOR_CSV.unlink(missing_ok=True)
