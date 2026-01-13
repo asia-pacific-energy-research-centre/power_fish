@@ -27,7 +27,7 @@ This repository converts OSeMOSYS-style Excel inputs into a NEMO scenario databa
 conda env create --prefix ./env_leap --file config/env_leap.yml
 conda activate ./env_leap
 ```
-The environment includes pandas/openpyxl/matplotlib/plotly for data prep and inspection.
+The environment includes pandas/openpyxl/plotly for data prep and inspection.
 
 ## Running the pipeline
 1. Configure paths and options in `code/main.py` (input Excel, template DB, output DB, scenario name, Julia path, diagnostics flags, `AUTO_CREATE_TEMPLATE_DB` toggle).
@@ -41,12 +41,13 @@ The environment includes pandas/openpyxl/matplotlib/plotly for data prep and ins
    - Solves the scenario in Julia/NEMO (`run_nemo_via_julia.py`) and writes an optional log (e.g., `data/nemo_run.log`).
    - To skip conversion and just run a test DB, run with `mode="test"` (e.g., `python code/main.py` with `mode` set in the call or cell). You can point `TEST_INPUT_PATH` to a local `.sqlite` or `.xlsx` (nemo_entry/osemosys; Excel will be converted), or pick an upstream `NEMO_TEST_NAME` (`storage_test`, `storage_transmission_test`, `ramp_test`) to auto-download into `data/nemo_tests/` (auto-download also kicks in when `TEST_INPUT_PATH` is missing but `NEMO_TEST_NAME` is set). Solver-specific test names like `cbc_tests`/`glpk_tests` will download the upstream Julia test script and run it against the bundled NEMO test DBs (logs in `results/logs/<solver>_tests.log`). During a test flow the DB-to-Excel dump uses `TEST_EXPORT_DB_TO_EXCEL_PATH` (falls back to `TEST_EXPORT_EXCEL_PATH`) so you can keep test exports separate from main runs.
    - To run an existing NEMO database without reconverting Excel, use `mode="db_only"`; set `OUTPUT_DB` to the `.sqlite` you want to run/diagnose.
-
-## Coding style at a glance
-- Scripts are split into `#%%` cells for quick interactive runs (VS Code with Jupyter interactive).
-- Functions first, orchestration later: utilities and data loaders sit near the top; `MAIN_*` blocks call them in order.
-- Prefer small, single-purpose functions over classes; keep inputs and outputs explicit.
-- Breakpoints are sprinkled in so you can step through cells when debugging.
+   
+## Plotly dashboards (results)
+- Driven by YAML at `config/plotly_charts.yml`. Set `layout: scroll` for individual cards or `layout: grid` for a single subplot dashboard (no scrolling). Optional `no_columns` (i.e. number of columns) sets the grid width.
+- Two plot sources: `function_figs` (named plot builders defined in `code/plotting/plotly_dashboard_functions.py` allowing for more contorl over the plot being created; see `available_functions` in the YAML) and `dict_figs` (table/X/Y/color configs defined inline in the YAML). You can mix both.
+- Per-plot options: use `function_options` to `drop_zero_categories`, `drop_categories`, or `aggregate_all` on categorical series (applies to both function and dict plots when a category column is present).
+- Colors/mappings come from `config/plotting_config_and_timeslices.xlsx`. Any unmapped labels get listed in `config/missing_plot_colors.csv` so you can add them to the mapping sheet.
+- Dashboard HTML is written to `results/plots/dashboard.html` after each run (or postprocess run). Use `mode="results"` or `RUN_POSTPROCESS_ONLY=true` to regenerate outputs/plots without re-running Julia.
 
 ## LEAP integration roadmap
 - export the populated NEMO DB back to Excel (`EXPORT_DB_TO_EXCEL`) for LEAP imports.

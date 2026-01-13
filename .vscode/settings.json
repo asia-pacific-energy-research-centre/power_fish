@@ -1,5 +1,9 @@
 {
-    "python-envs.defaultEnvManager": "ms-python.python:conda",
-    "python-envs.defaultPackageManager": "ms-python.python:conda",
-    "python-envs.pythonProjects": []
+  "workbench.editorAssociations": {
+    "*.xlsx": "cweijan.office-viewer",
+    "*.csv": "cweijan.office-viewer",
+    "*.md": "default",
+    "*.docx": "default",
+    "*.pptx": "default"
+  }
 }

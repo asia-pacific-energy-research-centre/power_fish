@@ -50,18 +50,33 @@ function main()
     # Silence solver iteration spam; comment out if you want full solver log.
     JuMP.set_silent(jumpmodel)
 
+    varstosave = get(ENV, "NEMO_VARSTOSAVE", "")
+    varstosave = String(strip(varstosave))
+
     # Call NEMO's main solve function
-    status = NemoMod.calculatescenario(
-        dbpath;
-        jumpmodel = jumpmodel,
-        # Optional tuning:
-        # calcyears = [ [2017, 2018, 2019, 2020] ],
-        # varstosave = "vdemandnn, vnewcapacity, vtotalcapacityannual,
-        #               vproductionbytechnologyannual, vproductionnn,
-        #               vusebytechnologyannual, vusenn, vtotaldiscountedcost",
-        # restrictvars = true,
-        # reportzeros = false,
-    )
+    if varstosave != ""
+        status = NemoMod.calculatescenario(
+            dbpath;
+            jumpmodel = jumpmodel,
+            varstosave = varstosave,
+            # Optional tuning:
+            # calcyears = [ [2017, 2018, 2019, 2020] ],
+            # restrictvars = true,
+            # reportzeros = false,
+        )
+    else
+        status = NemoMod.calculatescenario(
+            dbpath;
+            jumpmodel = jumpmodel,
+            # Optional tuning:
+            # calcyears = [ [2017, 2018, 2019, 2020] ],
+            # varstosave = "vdemandnn, vnewcapacity, vtotalcapacityannual,
+            #               vproductionbytechnologyannual, vproductionnn,
+            #               vusebytechnologyannual, vusenn, vtotaldiscountedcost",
+            # restrictvars = true,
+            # reportzeros = false,
+        )
+    end
 
     # Optionally dump the model to LP for infeasibility/unbounded debugging.
     # Set env NEMO_WRITE_LP to a filepath to always write,

@@ -16,6 +16,8 @@ from typing import Iterable, Sequence
 
 import pandas as pd
 
+from config_defaults import DEFAULTS
+
 from convert_osemosys_input_to_nemo import (
     dump_db_to_entry_excel,
     PARAM_SPECS,
@@ -301,6 +303,8 @@ def handle_test_run(vars_cfg: dict, data_dir: Path, log_dir: Path, run_nemo: boo
             julia_exe=vars_cfg.get("JULIA_EXE"),
             log_path=log_dir / "nemo_run.log",
             stream_output=True,
+            config_path=vars_cfg.get("NEMO_CONFIG_PATH"),
+            varstosave=vars_cfg.get("VARS_TO_SAVE"),
         )
     return True
 
@@ -746,70 +750,6 @@ def dummy_main(out_path: str | Path | None = None):
     make_dummy_workbook(Path(out_path))
 
 
-# ---------------------------------------------------------------------------
-# Default configuration (less frequently tweaked)
-# ---------------------------------------------------------------------------
-DEFAULTS = {
-    #defaults for main.py
-    "EXPORT_DB_TO_EXCEL": True,
-    # Paths (override in main if needed)
-    "TEMPLATE_DB": "nemo_template.sqlite",
-    "OUTPUT_DB": "nemo.sqlite",
-    "NEMO_TEST_DB_DIR": "nemo_tests",
-    "NEMO_TEST_NAME": "storage_test",
-    "TEST_OUTPUT_DB": "nemo_test.sqlite",
-    "TEST_INPUT_MODE": "nemo_entry",
-    # Units
-    "TARGET_UNITS": {"energy": "PJ", "power": "GW"},
-    "USE_UNIT_CONVERSION": False,
-    # Transmission / demand fuel handling
-    "ENABLE_NEMO_TRANSMISSION_METHODS": False,
-    "REMAP_DEMAND_FUELS_AND_STRIP_TRANSMISSION_TECHS": False,
-    "TEST_DB_PATH": None,
-    "TEST_INPUT_PATH": None,
-    "TEST_EXPORT_EXCEL_PATH": "nemo_entry_dump.xlsx",
-    "TEST_EXPORT_DB_TO_EXCEL_PATH": "nemo_entry_dump.xlsx",
-    # Template creation
-    "AUTO_CREATE_TEMPLATE_DB": True,
-    # Diagnostics
-    "RUN_DIAGNOSTICS": True,
-    "AUTO_FILL_MISSING_MODES": True,
-    "STRICT_ERRORS": True,
-    # NEMO / Julia
-    "JULIA_EXE": r"C:\\ProgramData\\Julia\\Julia-1.9.3\\bin\\julia.exe",
-    "NEMO_WRITE_LP": "intermediate_data/nemo_model_dump.lp"
-}
-
-
-def apply_defaults(user_vars: dict, data_dir: Path) -> dict:
-    """Fill in less-frequently changed defaults into user_vars, resolving paths via data_dir where needed."""
-    out = dict(user_vars)
-    out.setdefault("EXPORT_DB_TO_EXCEL", DEFAULTS["EXPORT_DB_TO_EXCEL"])
-    out.setdefault("TEMPLATE_DB", data_dir / DEFAULTS["TEMPLATE_DB"])
-    out.setdefault("OUTPUT_DB", data_dir / DEFAULTS["OUTPUT_DB"])
-    out.setdefault("NEMO_TEST_DB_DIR", data_dir / DEFAULTS["NEMO_TEST_DB_DIR"])
-    out.setdefault("NEMO_TEST_DB_PATH", None)
-    out.setdefault("NEMO_TEST_NAME", DEFAULTS["NEMO_TEST_NAME"])
-    out.setdefault("TEST_OUTPUT_DB", data_dir / DEFAULTS["TEST_OUTPUT_DB"])
-    out.setdefault("TEST_INPUT_MODE", DEFAULTS["TEST_INPUT_MODE"])
-    out.setdefault("TARGET_UNITS", DEFAULTS["TARGET_UNITS"])
-    out.setdefault("USE_UNIT_CONVERSION", DEFAULTS["USE_UNIT_CONVERSION"])
-    out.setdefault("ENABLE_NEMO_TRANSMISSION_METHODS", DEFAULTS["ENABLE_NEMO_TRANSMISSION_METHODS"])
-    out.setdefault("REMAP_DEMAND_FUELS_AND_STRIP_TRANSMISSION_TECHS", DEFAULTS["REMAP_DEMAND_FUELS_AND_STRIP_TRANSMISSION_TECHS"])
-    out.setdefault("TEST_INPUT_PATH", DEFAULTS["TEST_INPUT_PATH"])
-    out.setdefault("TEST_DB_PATH", DEFAULTS["TEST_DB_PATH"] if DEFAULTS["TEST_DB_PATH"] is None else data_dir / DEFAULTS["TEST_DB_PATH"])
-    out.setdefault("TEST_EXPORT_EXCEL_PATH", data_dir / DEFAULTS["TEST_EXPORT_EXCEL_PATH"])
-    out.setdefault("TEST_EXPORT_DB_TO_EXCEL_PATH", data_dir / DEFAULTS["TEST_EXPORT_DB_TO_EXCEL_PATH"])
-    out.setdefault("NEMO_TEST_EXCEL_PATH", data_dir / DEFAULTS["TEST_EXPORT_EXCEL_PATH"])  # backward compat name
-    out.setdefault("AUTO_CREATE_TEMPLATE_DB", DEFAULTS["AUTO_CREATE_TEMPLATE_DB"])
-    out.setdefault("JULIA_EXE", DEFAULTS["JULIA_EXE"])
-    out.setdefault("RUN_DIAGNOSTICS", DEFAULTS["RUN_DIAGNOSTICS"])
-    out.setdefault("AUTO_FILL_MISSING_MODES", DEFAULTS["AUTO_FILL_MISSING_MODES"])
-    out.setdefault("STRICT_ERRORS", DEFAULTS["STRICT_ERRORS"])
-    out.setdefault("NEMO_WRITE_LP", DEFAULTS["NEMO_WRITE_LP"])
-    return out
-
-
 __all__ = [
     "ensure_template_db",
     "trim_db_years_in_place",
@@ -826,5 +766,4 @@ __all__ = [
     "make_dummy_workbook",
     "dummy_main",
     "DEFAULTS",
-    "apply_defaults",
 ]

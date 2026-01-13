@@ -2,11 +2,13 @@
 import pandas as pd
 import numpy as np
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 from shutil import copyfile
 from typing import Any, Mapping, DefaultDict
 from collections import defaultdict
 
+from config_defaults import DEFAULT_PARAMS
 #note that the .sqlite DB template must be created once with NEMO's createnemodb() in Julia or via LEAP before running this script e.g. in Julia:
 # # using Pkg
 # # Pkg.add(url="https://github.com/sei-international/NemoMod.jl")
@@ -326,6 +328,7 @@ def load_sheet(excel_path: Path, sheet_name: str) -> pd.DataFrame:
     try:
         df = pd.read_excel(excel_path, sheet_name=sheet_name)
     except ValueError:
+        # breakpoint()
         print(f"  Sheet '{sheet_name}' not found. Skipping.")
         return pd.DataFrame()
 
@@ -911,6 +914,197 @@ def dump_db_to_entry_excel(
     conn.close()
     print(f"Wrote {len(used_sheet_names)} sheets to '{excel_path}'.")
 
+
+def export_results_to_excel(
+    db_path: Path,
+    excel_path: Path,
+    tables: list[str] | None = None,
+):
+    """
+    Export only result tables (names starting with 'v') to an Excel workbook.
+    Keeps columns in the narrow format (indices + val/solvedtm), with verbose
+    column names where possible.
+    """
+    db_path = Path(db_path)
+    excel_path = Path(excel_path)
+    excel_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    cur = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' "
+        "AND name LIKE 'v%' AND name NOT LIKE 'sqlite_%' "
+        "ORDER BY name"
+    )
+    skip_tables = {"Version", "VariableCost"}
+    all_tables = [row[0] for row in cur.fetchall() if row[0] not in skip_tables]
+    allowed = set(tables) if tables else None
+
+    used_sheet_names: set[str] = set()
+
+    def unique_sheet_name(base: str) -> str:
+        candidate = base[:31]
+        counter = 1
+        while candidate in used_sheet_names:
+            suffix = f"_{counter}"
+            candidate = (base[: 31 - len(suffix)] + suffix)[:31]
+            counter += 1
+        used_sheet_names.add(candidate)
+        return candidate
+
+    written = 0
+    with pd.ExcelWriter(excel_path) as writer:
+        for tbl in all_tables:
+            if allowed and tbl not in allowed:
+                continue
+            try:
+                df = pd.read_sql_query(f'SELECT * FROM "{tbl}"', conn)
+            except Exception as exc:
+                print(f"  Skipping '{tbl}' during results export: {exc}")
+                continue
+
+            if df.empty:
+                df = pd.DataFrame(columns=["VALUE"])
+
+            rename_map = {col: INDEX_NAME_MAP_REV.get(col, col) for col in df.columns}
+            if "val" in df.columns:
+                rename_map["val"] = "VALUE"
+            if "y" in df.columns:
+                rename_map["y"] = "YEAR"
+            # Drop solve timestamp; not useful for most analyses.
+            df = df.drop(columns=[c for c in df.columns if c.lower() == "solvedtm"], errors="ignore")
+            df = df.rename(columns=rename_map)
+            sheet_name = unique_sheet_name(tbl)
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
+            written += 1
+
+    conn.close()
+    print(f"Wrote {written} result table(s) to '{excel_path}'.")
+
+
+def export_results_to_excel_wide(
+    db_path: Path,
+    excel_path: Path,
+    tables: list[str] | None = None,
+):
+    """
+    Export result tables (v*) to an Excel workbook pivoted wide on YEAR.
+    Each sheet contains index columns + one column per YEAR.
+    """
+    db_path = Path(db_path)
+    excel_path = Path(excel_path)
+    excel_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    cur = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' "
+        "AND name LIKE 'v%' AND name NOT LIKE 'sqlite_%' "
+        "ORDER BY name"
+    )
+    skip_tables = {"Version", "VariableCost"}
+    no_year_tables = {"vmodelperiodemissions"}
+    all_tables = [row[0] for row in cur.fetchall() if row[0] not in skip_tables]
+    allowed = set(tables) if tables else None
+
+    used_sheet_names: set[str] = set()
+
+    def unique_sheet_name(base: str) -> str:
+        candidate = base[:31]
+        counter = 1
+        while candidate in used_sheet_names:
+            suffix = f"_{counter}"
+            candidate = (base[: 31 - len(suffix)] + suffix)[:31]
+            counter += 1
+        used_sheet_names.add(candidate)
+        return candidate
+
+    written = 0
+    with pd.ExcelWriter(excel_path) as writer:
+        for tbl in all_tables:
+            if allowed and tbl not in allowed:
+                continue
+            try:
+                df = pd.read_sql_query(f'SELECT * FROM "{tbl}"', conn)
+            except Exception as exc:
+                print(f"  Skipping '{tbl}' during wide results export: {exc}")
+                continue
+
+            if df.empty:
+                print(f"  Skipping '{tbl}' during wide results export: empty table")
+                continue
+
+            df = df.drop(columns=[c for c in df.columns if c.lower() == "solvedtm"], errors="ignore")
+            rename_map = {col: INDEX_NAME_MAP_REV.get(col, col) for col in df.columns}
+            if "val" in df.columns:
+                rename_map["val"] = "VALUE"
+            if "y" in df.columns:
+                rename_map["y"] = "YEAR"
+            df = df.rename(columns=rename_map)
+
+            if "YEAR" not in df.columns or "VALUE" not in df.columns:
+                if "VALUE" in df.columns and tbl in no_year_tables:
+                    idx_cols = [c for c in df.columns if c != "VALUE"]
+                    df = df[idx_cols + ["VALUE"]]
+                    sheet_name = unique_sheet_name(f"{tbl}_wide")
+                    df.to_excel(writer, sheet_name=sheet_name, index=False)
+                    written += 1
+                    continue
+                print(f"  Skipping '{tbl}' during wide results export: missing YEAR/VALUE")
+                continue
+
+            df["YEAR"] = pd.to_numeric(df["YEAR"], errors="coerce")
+            df = df.dropna(subset=["YEAR"])
+
+            idx_cols = [c for c in df.columns if c not in {"YEAR", "VALUE"}]
+            if not idx_cols:
+                df["_group"] = "total"
+                idx_cols = ["_group"]
+
+            try:
+                wide = (
+                    df.pivot_table(index=idx_cols, columns="YEAR", values="VALUE", aggfunc="first")
+                    .reset_index()
+                )
+            except Exception as exc:
+                print(f"  Skipping '{tbl}' during wide results export: pivot failed ({exc})")
+                continue
+
+            # Ensure year columns sorted and string-labeled for Excel friendliness.
+            non_year_cols = [c for c in wide.columns if not isinstance(c, (int, float))]
+            year_cols = sorted([c for c in wide.columns if isinstance(c, (int, float))])
+            ordered_cols = non_year_cols + year_cols
+            wide = wide[ordered_cols]
+            wide.columns = [str(c) if isinstance(c, (int, float)) else c for c in wide.columns]
+
+            sheet_name = unique_sheet_name(f"{tbl}_wide")
+            wide.to_excel(writer, sheet_name=sheet_name, index=False)
+            written += 1
+
+    conn.close()
+    print(f"Wrote {written} wide result table(s) to '{excel_path}'.")
+
+def _format_output_path(path: str | Path, config: dict, output_db: Path) -> Path:
+    def _stem(value: str | Path | None) -> str:
+        if not value:
+            return ""
+        return Path(value).stem
+
+    tokens = {
+        "SCENARIO": str(config.get("SCENARIO") or ""),
+        "ECONOMY": str(config.get("ECONOMY") or ""),
+        "INPUTNAME": _stem(
+            config.get("OSEMOSYS_EXCEL_PATH")
+            or config.get("NEMO_ENTRY_EXCEL_PATH")
+            or config.get("TEST_INPUT_PATH")
+            or output_db
+        ),
+        "DATEID": datetime.utcnow().strftime("%Y%m%d"),
+        "RUN_MODE": str(config.get("RUN_MODE") or config.get("INPUT_MODE") or ""),
+    }
+    path_str = str(path)
+    for key, value in tokens.items():
+        token = f"{{{key}}}"
+        if token in path_str and value is not None:
+            path_str = path_str.replace(token, str(value))
+    return Path(path_str)
+
 def populate_year_table(conn: sqlite3.Connection):
     cur = conn.cursor()
     tbl_year, col_year = _detect_year_table(conn)
@@ -1009,6 +1203,33 @@ def _backfill_capacity_unit_years(conn: sqlite3.Connection):
     )
     conn.commit()
     print(f"Backfilled CapacityOfOneTechnologyUnit for years; added {len(new_rows)} rows.")
+
+
+def _dedupe_capacity_unit(conn: sqlite3.Connection):
+    """
+    Ensure CapacityOfOneTechnologyUnit has unique (r, t, y) rows.
+    Keeps the first occurrence per key and drops any duplicates to avoid UNIQUE
+    constraint errors when NEMO reads the table.
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            CREATE TEMP TABLE _cap_unit_dedup AS
+            SELECT r, t, y, val
+            FROM CapacityOfOneTechnologyUnit
+            GROUP BY r, t, y
+            """
+        )
+        cur.execute('DELETE FROM "CapacityOfOneTechnologyUnit"')
+        cur.execute(
+            'INSERT INTO "CapacityOfOneTechnologyUnit" (r, t, y, val) '
+            'SELECT r, t, y, val FROM _cap_unit_dedup'
+        )
+        cur.execute('DROP TABLE _cap_unit_dedup')
+        conn.commit()
+    except Exception:
+        conn.rollback()
 
 
 def _ensure_minimal_transmission(conn: sqlite3.Connection):
@@ -1120,6 +1341,171 @@ def _strip_transmission_techs(conn: sqlite3.Connection):
             continue
     conn.commit()
 
+
+def _apply_emission_factors_from_fuel(
+    conn: sqlite3.Connection,
+    factors_csv: Path | None,
+    emission_label: str = "CO2",
+    overwrite: bool = False,
+) -> None:
+    if not factors_csv:
+        return
+    factors_csv = Path(factors_csv)
+    if not factors_csv.exists():
+        print(f"Emissions factors CSV not found: '{factors_csv}'. Skipping auto-emissions.")
+        return
+
+    try:
+        factors_df = pd.read_csv(factors_csv)
+    except Exception as exc:
+        print(f"Failed to read emissions factors CSV '{factors_csv}': {exc}")
+        return
+
+    if "fuel_code" not in factors_df.columns:
+        print("Emissions factors CSV missing required column 'fuel_code'. Skipping auto-emissions.")
+        return
+    if "Emissions factor (MT/PJ)" not in factors_df.columns:
+        print("Emissions factors CSV missing column 'Emissions factor (MT/PJ)'. Skipping auto-emissions.")
+        return
+
+    factors_df = factors_df[["fuel_code", "Emissions factor (MT/PJ)"]].copy()
+    factors_df["fuel_code"] = factors_df["fuel_code"].astype(str).str.strip()
+    factors_df["Emissions factor (MT/PJ)"] = pd.to_numeric(
+        factors_df["Emissions factor (MT/PJ)"], errors="coerce"
+    )
+    factors_df = factors_df.dropna(subset=["fuel_code", "Emissions factor (MT/PJ)"])
+    if factors_df.empty:
+        print("Emissions factors CSV has no usable rows. Skipping auto-emissions.")
+        return
+
+    factors_map = dict(
+        zip(factors_df["fuel_code"], factors_df["Emissions factor (MT/PJ)"])
+    )
+
+    try:
+        iar_df = pd.read_sql_query(
+            'SELECT r, t, f, m, y, val FROM "InputActivityRatio"',
+            conn,
+        )
+    except Exception as exc:
+        print(f"Failed to read InputActivityRatio for emissions calc: {exc}")
+        return
+    if iar_df.empty:
+        print("InputActivityRatio is empty; skipping auto-emissions.")
+        return
+
+    cur = conn.cursor()
+    if not overwrite:
+        try:
+            existing = cur.execute(
+                'SELECT COUNT(*) FROM "EmissionActivityRatio"'
+            ).fetchone()[0]
+        except Exception:
+            existing = 0
+        if existing:
+            print(
+                "EmissionActivityRatio already has rows; "
+                "skipping auto-emissions (set EMISSIONS_FACTOR_OVERRIDE=True to replace)."
+            )
+            return
+    else:
+        try:
+            cur.execute(
+                'DELETE FROM "EmissionActivityRatio" WHERE e = ?',
+                (emission_label,),
+            )
+        except Exception:
+            pass
+
+    iar_df["f"] = iar_df["f"].astype(str).str.strip()
+    iar_df["val"] = pd.to_numeric(iar_df["val"], errors="coerce")
+    iar_df = iar_df.dropna(subset=["val"])
+    if iar_df.empty:
+        print("InputActivityRatio has no numeric values; skipping auto-emissions.")
+        return
+
+    iar_df["factor"] = iar_df["f"].map(factors_map)
+    missing_fuels = sorted(set(iar_df[iar_df["factor"].isna()]["f"].unique().tolist()))
+    if missing_fuels:
+        print(
+            f"WARNING: {len(missing_fuels)} fuels missing emission factors (sample {missing_fuels[:8]})."
+        )
+
+    calc_df = iar_df.dropna(subset=["factor"]).copy()
+    if calc_df.empty:
+        print("No fuels matched emission factors; skipping auto-emissions.")
+        return
+
+    calc_df["val"] = calc_df["val"] * calc_df["factor"]
+    agg = (
+        calc_df.groupby(["r", "t", "m", "y"], dropna=False)["val"]
+        .sum()
+        .reset_index()
+    )
+    if agg.empty:
+        print("Auto-emissions aggregation produced no rows.")
+        return
+
+    rows = [(r, t, emission_label, m, int(y), float(val)) for r, t, m, y, val in agg.to_numpy()]
+    cur.executemany(
+        'INSERT INTO "EmissionActivityRatio" (r, t, e, m, y, val) VALUES (?, ?, ?, ?, ?, ?)',
+        rows,
+    )
+    _insert_set_values(conn, "EMISSION", {emission_label})
+    conn.commit()
+    print(
+        f"Inserted {len(rows)} EmissionActivityRatio rows from fuel factors "
+        f"('{emission_label}', {factors_csv.name})."
+    )
+
+
+def _ensure_default_params(conn: sqlite3.Connection, excel_path: Path):
+    cur = conn.cursor()
+    try:
+        existing = cur.execute('SELECT COUNT(*) FROM "DefaultParams"').fetchone()[0]
+    except Exception:
+        return
+    if existing:
+        return
+
+    df = load_sheet(excel_path, "DefaultParams")
+    if not df.empty:
+        tablename_col = "TABLENAME" if "TABLENAME" in df.columns else "TABLE"
+        val_col = "VAL" if "VAL" in df.columns else "VALUE"
+        if tablename_col in df.columns and val_col in df.columns:
+            rows = []
+            for _, row in df.iterrows():
+                tablename = str(row.get(tablename_col, "")).strip()
+                if not tablename:
+                    continue
+                val = row.get(val_col)
+                try:
+                    val = float(val)
+                except Exception:
+                    continue
+                row_id = row.get("ID")
+                if row_id is not None and str(row_id).strip() != "":
+                    try:
+                        row_id = int(float(row_id))
+                    except Exception:
+                        row_id = None
+                rows.append((row_id, tablename, val))
+            if rows:
+                cur.executemany(
+                    'INSERT INTO "DefaultParams" (id, tablename, val) VALUES (?, ?, ?)',
+                    rows,
+                )
+                conn.commit()
+                print(f"Inserted {len(rows)} DefaultParams rows from sheet.")
+                return
+
+    cur.executemany(
+        'INSERT INTO "DefaultParams" (id, tablename, val) VALUES (?, ?, ?)',
+        DEFAULT_PARAMS,
+    )
+    conn.commit()
+    print("Inserted DefaultParams defaults.")
+
 # -------------------------------------------------------------------
 # MAIN
 # -------------------------------------------------------------------
@@ -1166,8 +1552,10 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any], VERBOSE_ERRORS: bo
     remap_demand_fuels = bool(config.get("REMAP_DEMAND_FUELS_AND_STRIP_TRANSMISSION_TECHS", False))
     strict_errors = bool(config.get("STRICT_ERRORS", False))
     export_db_to_excel = bool(config.get("EXPORT_DB_TO_EXCEL", False))
-    EXPORT_DB_TO_EXCEL_PATH = Path(
-        config.get("EXPORT_DB_TO_EXCEL_PATH", output_db.with_suffix(".xlsx"))
+    EXPORT_DB_TO_EXCEL_PATH = _format_output_path(
+        config.get("EXPORT_DB_TO_EXCEL_PATH", output_db.with_suffix(".xlsx")),
+        config,
+        output_db,
     )
     export_table_filter = config.get("EXPORT_TABLE_FILTER", None)
 
@@ -1344,6 +1732,16 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any], VERBOSE_ERRORS: bo
     else:
         populate_year_table(conn)
 
+    _ensure_default_params(conn, excel_path)
+
+    # Optional: derive EmissionActivityRatio from fuel emission factors and InputActivityRatio.
+    _apply_emission_factors_from_fuel(
+        conn,
+        factors_csv=config.get("EMISSIONS_FACTOR_CSV"),
+        emission_label=str(config.get("EMISSIONS_LABEL", "CO2")),
+        overwrite=bool(config.get("EMISSIONS_FACTOR_OVERRIDE", False)),
+    )
+
     # Drop set entries that are not referenced in any parameter table
     _cleanup_unused_sets(conn)
     # Backstop: if cleanup left set tables empty (e.g., due to missing set sheets),
@@ -1354,6 +1752,7 @@ def convert_osemosys_input_to_nemo(config: Mapping[str, Any], VERBOSE_ERRORS: bo
     _fill_missing_availability(conn)
 
     _backfill_capacity_unit_years(conn)
+    _dedupe_capacity_unit(conn)
     if enable_transmission:
         _ensure_minimal_transmission(conn)
     else:
