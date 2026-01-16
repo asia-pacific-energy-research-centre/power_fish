@@ -1167,6 +1167,13 @@ def build_function_figs(
                 y_units = (opts or {}).get("y_units") or DEFAULT_Y_UNITS.get(key)
                 if y_units:
                     fig.update_yaxes(title_text=f"Value ({y_units})")
+                try:
+                    yaxis_type = getattr(fig.layout.yaxis, "type", None)
+                    yaxis_title = getattr(fig.layout.yaxis.title, "text", "") or ""
+                    if yaxis_type == "log" and "log" not in yaxis_title.lower():
+                        fig.update_yaxes(title_text=f"{yaxis_title} (log scale)".strip())
+                except Exception:
+                    pass
                 note = (opts or {}).get("note")
                 if isinstance(note, str) and note.strip():
                     try:
