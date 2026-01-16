@@ -659,8 +659,10 @@ def build_cost_per_production_fig(
     update_missing_colors(totals["TECHNOLOGY"].unique(), tech_colors, missing_colors or set())
     title = "Total cost per unit of production by technology"
     fig = px.line(totals, x="YEAR", y="VALUE", color="TECHNOLOGY", title=title, color_discrete_map=tech_colors)
-    if str(merged_opts.get("yaxis_type", "log")).lower() == "log":
+    yaxis_type = str(merged_opts.get("yaxis_type", "log")).lower()
+    if yaxis_type == "log":
         fig.update_yaxes(type="log")
+        fig.update_yaxes(title_text="Value (log scale)")
     return fig
 
 
