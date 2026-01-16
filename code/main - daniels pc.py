@@ -57,7 +57,7 @@ USER_VARS = {
     "ECONOMY": "United States Of America",
     ################################
     # Export populated NEMO DB to Excel
-    "EXPORT_DB_TO_EXCEL_PATH": DATA_DIR / "nemo_entry_dump_v3 - Copy.xlsx",
+    "EXPORT_DB_TO_EXCEL_PATH": DATA_DIR / "nemo_entry_dump_v3 - reflection.xlsx",
     "EXPORT_RESULTS_TO_EXCEL_PATH": PROJECT_ROOT / "results" / "results.xlsx",
     "EXPORT_RESULTS_WIDE_TO_EXCEL_PATH": PROJECT_ROOT / "results" / "results_wide.xlsx",
     # Years to use (None keeps all)
@@ -210,6 +210,6 @@ def main(mode: str | None = None, run_nemo: bool = True):
 # 
 #%%
 if __name__ == "__main__":
-    main('osemosys_input_xlsx')#results')
+    main('results')#results')
 
 # %%

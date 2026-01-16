@@ -1,64 +1,90 @@
 # power_fish: NEMO + LEAP starter kit
 
-This repository converts OSeMOSYS-style Excel inputs into a NEMO scenario database, runs NEMO via Julia, and provides quick diagnostics. It also seeds future LEAP interactions while keeping the vibe light with a few Finding NEMO jokes.
+Convert OSeMOSYS-style Excel inputs into a NEMO scenario database, run NEMO via Julia, and generate diagnostics plus Plotly dashboards. 
 
-## Prerequisites
-- Python 3.10+ (conda-friendly); recommended env file: `config/env_leap.yml`, use: conda env create --prefix ./env_leap --file ./config/env_leap.yml
-- Julia 1.9+ with the NEMO model (NemoMod.jl) installed.
-- Microsoft Excel/`openpyxl` for reading the input workbook.
-- (Planned) LEAP for model exchange and API automation.
-
-## Install LEAP and Julia/NEMO  
-- Download LEAP and NEMO/Julia from https://leap.sei.org/default.asp?action=download (requires a free account). 
-- LEAP docs & help center live at https://leap.sei.org/learn/ (API and automation guidance are in the LEAP help menu).
-- The COM API type library included here (`config/TypeLib_LEAP_API_full.txt`) is for reference when wiring Python automation later.
-
-## Set up NEMO
-1. Create a template database once (placed in your `data/` folder). The pipeline can also auto-create it at runtime if `AUTO_CREATE_TEMPLATE_DB=True` and Julia/NemoMod are available:
+## Quick start
+1. Create the Python environment:
+   ```bash
+   conda env create --prefix ./env_leap --file config/env_leap.yml
+   conda activate ./env_leap
+   ```
+2. Create a NEMO template database (one-time):
    ```julia
    using NemoMod
    cd("C:/Users/YOU/path/to/power_fish/data")
    NemoMod.createnemodb("nemo_template.sqlite")
    ```
-2. NEMO docs: https://sei-international.github.io/NemoMod.jl/stable/ 
-
-## Python environment
-```bash
-conda env create --prefix ./env_leap --file config/env_leap.yml
-conda activate ./env_leap
-```
-The environment includes pandas/openpyxl/plotly for data prep and inspection.
-
-## Running the pipeline
-1. Configure paths and options in `code/main.py` (input Excel, template DB, output DB, scenario name, Julia path, diagnostics flags, `AUTO_CREATE_TEMPLATE_DB` toggle).
-2. If `AUTO_CREATE_TEMPLATE_DB` is True, the script will build `data/nemo_template.sqlite` for you on first run (requires Julia with NemoMod installed). Otherwise, create it manually (see NEMO setup above).
-3. Run everything in Jupyter interactive via visual studio code (which is how finn codes), or in python e.g.:
+3. Run the pipeline (from a notebook cell or CLI):
    ```bash
    python code/main.py
    ```
-   - Converts the original OSeMOSYS Excel workbook to a NEMO DB (`OUTPUT_DB`).
-   - Optionally runs diagnostics (`RUN_DIAGNOSTICS`).
-   - Solves the scenario in Julia/NEMO (`run_nemo_via_julia.py`) and writes an optional log (e.g., `data/nemo_run.log`).
-   - To skip conversion and just run a test DB, run with `mode="test"` (e.g., `python code/main.py` with `mode` set in the call or cell). You can point `TEST_INPUT_PATH` to a local `.sqlite` or `.xlsx` (nemo_entry/osemosys; Excel will be converted), or pick an upstream `NEMO_TEST_NAME` (`storage_test`, `storage_transmission_test`, `ramp_test`) to auto-download into `data/nemo_tests/` (auto-download also kicks in when `TEST_INPUT_PATH` is missing but `NEMO_TEST_NAME` is set). Solver-specific test names like `cbc_tests`/`glpk_tests` will download the upstream Julia test script and run it against the bundled NEMO test DBs (logs in `results/logs/<solver>_tests.log`). During a test flow the DB-to-Excel dump uses `TEST_EXPORT_DB_TO_EXCEL_PATH` (falls back to `TEST_EXPORT_EXCEL_PATH`) so you can keep test exports separate from main runs.
-   - To run an existing NEMO database without reconverting Excel, use `mode="db_only"`; set `OUTPUT_DB` to the `.sqlite` you want to run/diagnose.
-   
-## Plotly dashboards (results)
-- Driven by YAML at `config/plotly_charts.yml`. Set `layout: scroll` for individual cards or `layout: grid` for a single subplot dashboard (no scrolling). Optional `no_columns` (i.e. number of columns) sets the grid width.
-- Two plot sources: `function_figs` (named plot builders defined in `code/plotting/plotly_dashboard_functions.py` allowing for more contorl over the plot being created; see `available_functions` in the YAML) and `dict_figs` (table/X/Y/color configs defined inline in the YAML). You can mix both.
-- Per-plot options: use `function_options` to `drop_zero_categories`, `drop_categories`, or `aggregate_all` on categorical series (applies to both function and dict plots when a category column is present).
-- Colors/mappings come from `config/plotting_config_and_timeslices.xlsx`. Any unmapped labels get listed in `config/missing_plot_colors.csv` so you can add them to the mapping sheet.
-- Dashboard HTML is written to `results/plots/dashboard.html` after each run (or postprocess run). Use `mode="results"` or `RUN_POSTPROCESS_ONLY=true` to regenerate outputs/plots without re-running Julia.
+
+## What you get
+- NEMO scenario database (`.sqlite`) built from the input workbook.
+- Optional diagnostics and exports (Excel outputs).
+- Plotly dashboard HTML with charts defined in YAML.
+
+## Prerequisites
+- Python 3.10+ (conda-friendly); environment file: `config/env_leap.yml`.
+- Julia 1.9+ with NemoMod.jl installed.
+- Excel / `openpyxl` for reading input workbooks.
+- (Planned) LEAP integration.
+
+## Pipeline usage (short version)
+- Configure paths and options in `code/main.py` (input Excel, template DB, output DB, scenario name, Julia path, diagnostics flags, `AUTO_CREATE_TEMPLATE_DB`).
+- Run with `python code/main.py`.
+- For postprocess only (no Julia run), set `RUN_POSTPROCESS_ONLY=true` or use `mode="results"`.
+- To run an existing NEMO DB without reconverting Excel, use `mode="db_only"` with `OUTPUT_DB` set to the `.sqlite` to process.
+
+## Visualization features (Plotly dashboards)
+Charts are controlled by `config/plotly_charts.yml` and rendered after each run.
+
+### How it works
+- Two chart types:
+  - `function_figs`: named builders in `code/plotting/plotly_dashboard_functions.py`.
+  - `dict_figs`: direct table/X/Y/color configs defined in YAML.
+- Mappings + colors come from `config/plotting_config_and_timeslices.xlsx`.
+- Any unmapped labels are written to `config/missing_plot_colors.csv` for cleanup.
+- Dashboard HTML is written to `results/plots/` (or `PLOTLY_DASHBOARD_PATH` when set).
+
+### Common edits in `config/plotly_charts.yml`
+- Add/remove charts by editing `function_figs`.
+- Tweak each chart with options under its name.
+- Use `drop_zero_categories`, `drop_categories`, or `drop_category_substrings` to clean legends.
+
+### Example: enable/disable a chart
+```yaml
+function_figs:
+  generation:
+    drop_zero_categories: true
+  costs_by_technology:
+    drop_zero_categories: true
+```
+
+### Example: adjust the generation chart demand line
+```yaml
+function_figs:
+  generation:
+    add_demand_line: true
+    demand_line_label: Demand
+    demand_line_color: "#000000"
+    demand_line_width: 2
+```
 
 ## LEAP integration roadmap
-- export the populated NEMO DB back to Excel (`EXPORT_DB_TO_EXCEL`) for LEAP imports.
-- script LEAP COM calls (using the provided type library and what has already been done in leap_utils_with_transport_toolkit) to pull scenarios, push results, and align metadata.
-- automate end-to-end runs from LEAP through NEMO and back.
-- simplify and robustify the workflow for non-Python users.
+- Export the populated NEMO DB back to Excel (`EXPORT_DB_TO_EXCEL`) for LEAP imports.
+- Script LEAP COM calls (using `config/TypeLib_LEAP_API_full.txt`) for scenario exchange.
+- Automate end-to-end runs between LEAP and NEMO.
 
 ## Where things live
-- Workflow scripts: `code/main.py`, `code/convert_osemosys_input_to_nemo.py`, `code/run_nemo_via_julia.py`, `code/diagnostics.py`
-- Julia runner: `code/nemo_process.jl`
-- Sample data and outputs: `data/`, `intermediate_data/`, `results/`, `plotting_output/`
+- Workflow scripts: `code/main.py`, `code/convert_osemosys_input_to_nemo.py`, `code/run_nemo_via_julia.py`
+- Plotting: `code/plotting/plotly_dashboard.py`, `code/plotting/plotly_dashboard_functions.py`
+- Data + outputs: `data/`, `intermediate_data/`, `results/`, `plotting_output/`
+
+## Install LEAP and Julia/NEMO
+- Download LEAP and NEMO/Julia: https://leap.sei.org/default.asp?action=download
+- LEAP docs: https://leap.sei.org/learn/
+- NEMO docs: https://sei-international.github.io/NemoMod.jl/stable/
 
 🐟🐟🐟🐟🐟🐟🐟🐟🐟🐟🐟🐟🐟🐟🐟🐟🐟🐟🐟🐟🐟🐟🐟🐟🐟
 

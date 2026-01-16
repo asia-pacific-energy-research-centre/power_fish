@@ -48,8 +48,8 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 # AGENT TEST SETTINGS
 # -------------------------------------------------------------------
 # Edit these to trade off speed vs coverage for quick checks.
-AGENT_TEST_MODE = "osemosys_input_xlsx"  # options: results, test, dummy, db_only, osemosys_input_xlsx, nemo_input_xlsx
-AGENT_TEST_RUN_NEMO = True  # keep False to avoid running Julia by default
+AGENT_TEST_MODE = "results"  # options: results, test, dummy, db_only, osemosys_input_xlsx, nemo_input_xlsx
+AGENT_TEST_RUN_NEMO = False  # keep False to avoid running Julia by default
 AGENT_TEST_USE_LAST_RUN = False
 AGENT_TEST_LAST_RUN_CONFIG = TESTS_ROOT / "last_run" / "config.json"
 AGENT_TEST_RUNTIME_STATE = TESTS_ROOT / "last_run" / "runtime.json"

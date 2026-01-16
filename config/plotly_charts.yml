@@ -14,12 +14,19 @@ dashboard_title: NEMO Power model dashboard - {SCENARIO} - {ECONOMY}
 top_n_categories: 20
 top_n_include_other: true
 map_unmapped_to_other: false
+drop_category_substrings: ["INF"]
 ##############################################################
 # Define pre-defined functions available for automatic plotting below
 available_functions: # charts with pre-defined functions available for automatic plotting. Choose from these and state in the 'function_figs' section below
 - capacity # Area chart of total capacity by technology over time (vtotalcapacityannual)
+- capacity_factor # Line chart of capacity factor by technology over time (vproductionbytechnologyannual / vtotalcapacityannual)
+- capacity_factor_availability # Line chart of capacity factor from AvailabilityFactor/YearSplit
+- capacity_factor_timeslice # Bar chart of timeslice availability factor by technology (AvailabilityFactor)
+- cost_per_production # Line chart of total cost per unit of production by technology
+- costs_by_technology # Line chart of fixed (solid) and variable (dotted) costs by technology
 - emissions # Area chart of emissions by technology over time (AnnualTechnologyEmission) > TODO not yet implemented
 - generation # Area chart of generation by technology over time (vproductionbytechnologyannual)
+- generation_timeslice # Bar chart of average generation by timeslice (vproductionnn / YearSplit)
 - input_use # Line chart of input use by technology over time (vusebytechnologyannual)
 - new_capacity # Bar chart of new capacity by technology over time (vnewcapacity)
 - total_cost # Line chart of total discounted cost over time (vtotaldiscountedcost)
@@ -28,39 +35,104 @@ available_functions: # charts with pre-defined functions available for automatic
 function_figs:
   generation:
     drop_zero_categories: true
+    drop_category_substrings: ['Transmission']
     # top_n_categories: 8
     # top_n_include_other: false
   capacity:
     drop_zero_categories: true
+    drop_category_substrings: ['Transmission']
+  capacity_factor:
+    drop_zero_categories: true
+    drop_category_substrings: ['Transmission']
+    note: "Derived from modeled generation and installed capacity: annual capacity factor = generation / (capacity * 8760)."
+  capacity_factor_availability:
+    drop_category_substrings: ['Transmission']
+    drop_zero_categories: true
+    as_percent: true
+    technology_aggregation: weighted_mean # options: simple_mean, weighted_mean, median, min, max
+    technology_weight_source: activity # weighted_mean options: activity, production, capacity
+    note: "Annual availability-based capacity factor. Values are aggregated across mapped technologies using a weighted mean. Weights use technology_weight_source={technology_weight_source}."
+
+  capacity_factor_timeslice:
+    drop_category_substrings: ['Transmission']
+    drop_zero_categories: true
+    year: latest
+    as_percent: true
+    barmode: group
+    note: "Timeslice availability-based capacity factor. For the selected year, values are averaged within each mapped technology for each timeslice (not scaled to an annual average)."
+  costs_by_technology:
+    drop_category_substrings: ['Transmission']
+    drop_zero_categories: true
+    variable_line_dash: dot
+    note: "Fixed total cost is FixedCost times Capacity. Variable total cost is VariableCost times Activity. Lines show annual totals by technology."
+  cost_per_production:
+    drop_category_substrings: ['Transmission']
+    drop_zero_categories: true
+    yaxis_type: log
+    note: "Total cost per unit of production. Fixed total cost is based on installed capacity; variable total cost is based on activity; the sum is divided by production."
+  generation_timeslice:
+  - year: 2023
+    drop_zero_categories: true
+    barmode: relative
+    include_capacity_timeslice: true
+    capacity_timeslice_label: CAPACITY
+    capacity_drop_tech_substrings: ['_CHP']
+    title: "Average generation by timeslice (Year 2023)"
+    note: "Average generation by timeslice (GW) is derived from annual technology generation weighted by AvailabilityFactor and YearSplit. The 'CAPACITY' timeslice shows total installed capacity for the selected year and is drawn with a bold outline."
+  - year: 2035
+    drop_zero_categories: true
+    barmode: relative
+    include_capacity_timeslice: true
+    capacity_timeslice_label: CAPACITY
+    capacity_drop_tech_substrings: ['_CHP']
+    title: "Average generation by timeslice (Year 2035)"
+    note: "Average generation by timeslice (GW) is derived from annual technology generation weighted by AvailabilityFactor and YearSplit. The 'CAPACITY' timeslice shows total installed capacity for the selected year and is drawn with a bold outline."
+  - year: 2059
+    drop_zero_categories: true
+    barmode: relative
+    include_capacity_timeslice: true
+    capacity_timeslice_label: CAPACITY
+    capacity_drop_tech_substrings: ['_CHP']
+    title: "Average generation by timeslice (Year 2059)"
+    note: "Average generation by timeslice (GW) is derived from annual technology generation weighted by AvailabilityFactor and YearSplit. The 'CAPACITY' timeslice shows total installed capacity for the selected year and is drawn with a bold outline."
   input_use:
+    drop_category_substrings: ['Transmission']
     drop_zero_categories: true
   emissions:
     drop_zero_categories: true
+    use_emission_activity_ratio: false
+    use_emissions_factors_csv: true
+    emissions_factor_csv: config/9th_edition_emission_factors.csv
+    note: "Emissions use factors from config/9th_edition_emission_factors.csv (mapped to fuels), combined with annual activity."
   new_capacity:
+    drop_category_substrings: ['Transmission']
     drop_zero_categories: true
-  total_cost: {}
+  total_cost:
+    note: "Total system cost by year, summed across all available cost components."
 ###############################################################
 # Define custom figures to be plotted below. use the table names from the database and define x and y axes using the column names from the tables. Basically follows the plotly.express parameters format, e.g. plotly.express.area(data_frame=table, x=x, y=y, color=color, title=title, ...)
-dict_figs:
-- table: vproductionbytechnologyannual
-  plot: area
-  x: YEAR
-  y: VALUE
-  color: TECHNOLOGY
-  title: Production by tech
-  y_units: PJ
-  transform: sum_by_group
-  groupby: [TECHNOLOGY, YEAR]
-  function_options:
-    drop_zero_categories: true
-    # top_n_categories: 10
-    # top_n_include_other: false
-- table: vnewcapacity
-  plot: bar
-  x: YEAR
-  y: VALUE
-  color: TECHNOLOGY
-  title: New capacity
-  y_units: GW
-  function_options:
-    drop_zero_categories: true
+# dict_figs:
+# - table: vproductionbytechnologyannual
+#   plot: area
+#   x: YEAR
+#   y: VALUE
+#   color: TECHNOLOGY
+#   title: Production by tech
+#   y_units: PJ
+#   transform: sum_by_group
+#   groupby: [TECHNOLOGY, YEAR]
+#   function_options:
+#     drop_zero_categories: true
+#     drop_category_substrings: ['Transmission']
+#     # top_n_categories: 10
+#     # top_n_include_other: false
+# - table: vnewcapacity
+#   plot: bar
+#   x: YEAR
+#   y: VALUE
+#   color: TECHNOLOGY
+#   title: New capacity
+#   y_units: GW
+#   function_options:
+#     drop_zero_categories: true
+#     drop_category_substrings: ['Transmission']

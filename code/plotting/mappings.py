@@ -125,6 +125,23 @@ INPUT_FUEL_MAP = {
     'POW_15_solid_biomass': 'Biomass',
     'POW_16_others': 'Other',
     'POW_17_electricity_imports': 'Imports',
+    'Coal_PP_fuel': 'Coal',
+    'Lignite_PP_fuel': 'Coal',
+    'Gas_PP_fuel': 'Gas',
+    'Gas_NEW_PP_fuel': 'Gas',
+    'Gas_NEW_CCS_PP_fuel': 'Gas',
+    'Gas_NEW_H2_25_PP_fuel': 'Gas',
+    'Gas_NEW_H2_50_PP_fuel': 'Gas',
+    'Oil_PP_fuel': 'Oil',
+    'Nuclear_PP_fuel': 'Nuclear',
+    'Hydro_PP_fuel': 'Hydro',
+    'Geothermal_PP_fuel': 'Geothermal',
+    'SolarPV_PP_fuel': 'Solar',
+    'SolarCSP_PP_fuel': 'Solar',
+    'Wind_PP_fuel': 'Wind',
+    'WindOff_PP_fuel': 'Wind',
+    'Solid_Biomass_PP_fuel': 'Biomass',
+    'Other_PP_fuel': 'Other',
 }
 
 PLOTTING_COLORS = {
@@ -146,4 +163,25 @@ PLOTTING_COLORS = {
     'Storage_discharge': '#FFC0CB',
     'Transmission': '#00F000',
     'Wind': '#00FFFF',
+}
+
+# Map model-specific fuel labels to emissions factor fuel codes.
+EMISSIONS_FACTOR_FUEL_MAP = {
+    "Coal_PP_fuel": "01_x_thermal_coal",
+    "Lignite_PP_fuel": "01_05_lignite",
+    "Oil_PP_fuel": "07_08_fuel_oil",
+    "Gas_PP_fuel": "08_01_natural_gas",
+    "Gas_NEW_PP_fuel": "08_01_natural_gas",
+    "Gas_NEW_CCS_PP_fuel": "08_01_natural_gas_CCS",
+    "Gas_NEW_H2_25_PP_fuel": "08_01_natural_gas",
+    "Gas_NEW_H2_50_PP_fuel": "08_01_natural_gas",
+    "Nuclear_PP_fuel": "09_nuclear",
+    "Hydro_PP_fuel": "10_hydro",
+    "Geothermal_PP_fuel": "11_geothermal",
+    "SolarPV_PP_fuel": "12_01_of_which_photovoltaics",
+    "SolarCSP_PP_fuel": "12_solar",
+    "Wind_PP_fuel": "14_wind",
+    "WindOff_PP_fuel": "14_wind",
+    "Solid_Biomass_PP_fuel": "15_solid_biomass",
+    "Other_PP_fuel": "16_others",
 }

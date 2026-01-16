@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import html
 from pathlib import Path
 import sqlite3
 from typing import Iterable
@@ -211,6 +212,11 @@ def _merge_cleaning_opts(
     if top_n_default is not None:
         merged["top_n_categories"] = top_n_default
     merged.update(opts or {})
+    # Merge global + per-plot substring drops instead of overwriting.
+    defaults_drop = (defaults or {}).get("drop_category_substrings") or []
+    opts_drop = (opts or {}).get("drop_category_substrings") or []
+    if defaults_drop or opts_drop:
+        merged["drop_category_substrings"] = list(dict.fromkeys([*defaults_drop, *opts_drop]))
     # Allow alternate key in YAML
     if "top_n" in (opts or {}) and "top_n_categories" not in (opts or {}):
         merged["top_n_categories"] = (opts or {}).get("top_n")
@@ -277,6 +283,7 @@ def generate_plotly_dashboard(
         ),
         "min_total": yaml_cfg.get("min_total"),
         "min_share": yaml_cfg.get("min_share"),
+        "drop_category_substrings": yaml_cfg.get("drop_category_substrings"),
     }
     fn_figs_cfg = function_figs if function_figs is not None else yaml_cfg.get("function_figs")
     fn_figs = normalize_function_figs(fn_figs_cfg)
@@ -552,23 +559,31 @@ def create_dashboard_html(
         f".grid {{display:grid; grid-template-columns:repeat({grid_cols}, 1fr); gap:16px;}}"
         ".card {background:#fff; border:1px solid #e0e0e0; border-radius:8px; padding:12px; box-shadow:0 1px 3px rgba(0,0,0,0.05);}"
         ".card .plotly-graph-div {width:100%!important; height:420px!important;}"
+        ".card .note {margin:8px 4px 0; font-size:12px; color:#444;}"
         "body {font-family:Arial, sans-serif; margin:20px; background:#f7f7f9;}"
         "h1 {margin-bottom:16px; font-size:28px;}"
         "@media (max-width: 640px) {.grid {grid-template-columns:1fr;}}"
         "</style>"
     )
-    html_blocks: list[str] = []
+    html_blocks: list[tuple[str, str | None]] = []
     for fig in figs:
+        note = None
+        meta = getattr(fig.layout, "meta", None)
+        if isinstance(meta, dict):
+            note = meta.get("note")
         html_blocks.append(
-            fig.to_html(
-                full_html=False,
-                include_plotlyjs="cdn",
-                default_width="100%",
-                default_height="100%",
+            (
+                fig.to_html(
+                    full_html=False,
+                    include_plotlyjs="cdn",
+                    default_width="100%",
+                    default_height="100%",
+                ),
+                note,
             )
         )
 
-    html = [
+    html_parts = [
         "<html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
         f"<title>{title_text}</title>",
         style,
@@ -576,10 +591,13 @@ def create_dashboard_html(
         f"<h1>{title_text}</h1>",
         "<div class='grid'>",
     ]
-    for block in html_blocks:
-        html.append(f"<div class='card'>{block}</div>")
-    html.append("</div></body></html>")
-    output_path.write_text("\n".join(html), encoding="utf-8")
+    for block, note in html_blocks:
+        note_html = ""
+        if isinstance(note, str) and note.strip():
+            note_html = f"<p class='note'>{html.escape(note.strip())}</p>"
+        html_parts.append(f"<div class='card'>{block}{note_html}</div>")
+    html_parts.append("</div></body></html>")
+    output_path.write_text("\n".join(html_parts), encoding="utf-8")
     print(f"Wrote plotly dashboard with {len(figs)} plot(s) to '{output_path}'.")
 
 
